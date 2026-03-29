@@ -20,6 +20,27 @@ function getExecutionMode() {
   return "simulation";
 }
 
+function getExecutionDiagnostics() {
+  const apiKey = Deno.env.get("BINANCE_API_KEY") ?? "";
+  const apiSecret = Deno.env.get("BINANCE_API_SECRET") ?? "";
+  const testnetFlag = String(Deno.env.get("BINANCE_TESTNET") ?? "").toLowerCase();
+  const isTestnet = ["1", "true", "yes", "on"].includes(testnetFlag);
+  const mode = getExecutionMode();
+  const blockers = [
+    !apiKey ? "BINANCE_API_KEY fehlt serverseitig." : null,
+    !apiSecret ? "BINANCE_API_SECRET fehlt serverseitig." : null,
+    apiKey && apiSecret && !isTestnet ? "BINANCE_TESTNET ist nicht auf true gesetzt." : null,
+  ].filter(Boolean);
+
+  return {
+    mode,
+    hasApiKey: Boolean(apiKey),
+    hasApiSecret: Boolean(apiSecret),
+    testnetEnabled: isTestnet,
+    blockers,
+  };
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
@@ -51,6 +72,22 @@ Deno.serve(async (req) => {
     const portfolio = portfolios?.[0] ?? null;
     const currentPrice = await fetchPrice(String(strategy.symbol));
     const executionMode = getExecutionMode();
+    const diagnostics = getExecutionDiagnostics();
+
+    if (action === "status") {
+      return Response.json(
+        {
+          ok: true,
+          executionMode,
+          diagnostics,
+          strategyId,
+          qualityGatePassed: gateEvaluation.passed,
+          qualityGateReasons: gateEvaluation.reasons,
+          hasActivePortfolio: Boolean(portfolio?.is_active),
+        },
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
 
     if (action === "start") {
       if (!gateEvaluation.passed) {

@@ -190,9 +190,26 @@ export default function ExecutionPage() {
                   ))}
                 </select>
                 <Button onClick={() => executeTrade.mutate({ action: "start", strategyId: selectedStrategyId })} disabled={!selectedStrategyId || executeTrade.isPending || liveExecutionBlocked}>Start</Button>
+                <Button variant="outline" onClick={() => executeTrade.mutate({ action: "status", strategyId: selectedStrategyId })} disabled={!selectedStrategyId || executeTrade.isPending}>Status</Button>
                 <Button variant="outline" onClick={() => executeTrade.mutate({ action: "check", strategyId: selectedStrategyId })} disabled={!selectedStrategyId || executeTrade.isPending || liveExecutionBlocked}>Check</Button>
                 <Button variant="destructive" onClick={() => executeTrade.mutate({ action: "stop", strategyId: selectedStrategyId })} disabled={!selectedStrategyId || executeTrade.isPending}>Stop</Button>
               </div>
+              {executeTrade.data?.diagnostics && (
+                <div className="rounded-xl bg-muted p-4">
+                  <p className="font-medium text-foreground">Execution Diagnostics</p>
+                  <p className="mt-1">Mode {executeTrade.data.diagnostics.mode}</p>
+                  <p className="mt-1">
+                    API Key {executeTrade.data.diagnostics.hasApiKey ? "vorhanden" : "fehlt"} · API Secret {executeTrade.data.diagnostics.hasApiSecret ? "vorhanden" : "fehlt"} · Testnet {executeTrade.data.diagnostics.testnetEnabled ? "aktiv" : "aus"}
+                  </p>
+                  {executeTrade.data.diagnostics.blockers?.length > 0 && (
+                    <div className="mt-2 space-y-1 text-amber-600">
+                      {executeTrade.data.diagnostics.blockers.map((reason: string) => (
+                        <p key={reason}>{reason}</p>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
               {executeTrade.data?.order && (
                 <div className="rounded-xl bg-muted p-4">
                   <p className="font-medium text-foreground">Letzter Execution Check</p>

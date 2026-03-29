@@ -1,7 +1,7 @@
 ﻿import { supabase } from "@/integrations/supabase/client";
 
 export interface ExecuteTradeRequest {
-  action: "start" | "check" | "stop";
+  action: "start" | "check" | "stop" | "status";
   strategyId: string;
   initialCapital?: number;
 }
