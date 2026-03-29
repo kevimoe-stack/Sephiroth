@@ -1,5 +1,25 @@
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+﻿import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { corsHeaders } from "../_shared/cors.ts";
+import { evaluateQualityGates } from "../_shared/quality-gates.ts";
+
+type StrategyRow = Record<string, unknown> & {
+  id: string;
+  name?: string;
+  symbol?: string;
+  timeframe?: string;
+  asset_class?: string;
+  description?: string | null;
+  parameters?: Record<string, unknown> | null;
+  tags?: string[] | null;
+  status?: string;
+};
+
+type OptimizationPlan = {
+  objective: string;
+  parameterPatch: Record<string, number | string | boolean>;
+  rationale: string[];
+  nextExperiment: string;
+};
 
 function scoreStrategy(backtest: Record<string, unknown> | null, walkforward: Array<Record<string, unknown>>) {
   const sharpe = Number(backtest?.sharpe_ratio ?? 0);
@@ -28,49 +48,103 @@ function buildRisks(backtest: Record<string, unknown> | null, passedRatio: numbe
   return risks;
 }
 
-function buildOptimization(strategy: Record<string, unknown>) {
+function dedupe<T>(values: T[]) {
+  return Array.from(new Set(values));
+}
+
+function buildOptimization(strategy: StrategyRow, gateReasons: string[]): OptimizationPlan {
   const name = String(strategy.name ?? "").toLowerCase();
+  const rationale = [...gateReasons];
+
   if (name.includes("rsi")) {
+    const parameterPatch: OptimizationPlan["parameterPatch"] = { rsiPeriod: 12, oversold: 24, overbought: 74, exitLevel: 52 };
+    if (gateReasons.includes("Drawdown zu hoch")) parameterPatch.stopLossPercent = 1.8;
+    if (gateReasons.includes("Walk-Forward zu instabil")) parameterPatch.trendFilterEma = 200;
     return {
-      objective: "Mehr Stabilitaet zwischen In-Sample und OOS",
-      parameterPatch: { rsiPeriod: 10, oversold: 27, exitLevel: 54 },
-      rationale: [
-        "Etwas reaktiveres RSI-Setup kann bei Mean-Reversion fruehere Entries liefern.",
-        "Der Exit-Level wird leicht gesenkt, um Gewinne frueher zu sichern.",
-      ],
-      nextExperiment: "Teste 1h vs 4h und fuege Regime-Filter gegen starke Trendphasen hinzu.",
+      objective: "Mean-Reversion stabilisieren und Trendfilter ergaenzen",
+      parameterPatch,
+      rationale: dedupe([
+        ...rationale,
+        "RSI-Einstiege werden selektiver gemacht, damit schwache Gegenbewegungen seltener getradet werden.",
+        "Ein hoeherer Trendfilter reduziert Mean-Reversion-Trades gegen dominante Makrotrends.",
+      ]),
+      nextExperiment: "Teste dieselbe Variante auf 4h mit hoeherem Trendfilter und konservativerem Stop-Loss.",
     };
   }
+
   if (name.includes("boll")) {
+    const parameterPatch: OptimizationPlan["parameterPatch"] = { period: 22, multiplier: 2.6, atrFilter: 1.2 };
     return {
-      objective: "Breakouts selektiver handeln",
-      parameterPatch: { period: 20, multiplier: 2.5 },
-      rationale: [
-        "Ein breiteres Band filtert schwache Ausbrueche besser heraus.",
-        "Das senkt meist Trade-Frequenz zugunsten hoeherer Signalqualitaet.",
-      ],
-      nextExperiment: "Kombiniere den Einstieg mit Volumen- oder ATR-Anstieg.",
+      objective: "Breakouts selektiver handeln und Volatilitaet filtern",
+      parameterPatch,
+      rationale: dedupe([
+        ...rationale,
+        "Breitere Baender und ein ATR-Filter senken die Zahl schwacher Fakeouts.",
+        "Weniger Trades sind hier akzeptabel, wenn Profit Factor und OOS-Stabilitaet steigen.",
+      ]),
+      nextExperiment: "Pruefe 1h gegen 4h und kombiniere den Einstieg mit einem Volumenfilter.",
     };
   }
+
   if (name.includes("macd")) {
+    const parameterPatch: OptimizationPlan["parameterPatch"] = { fastPeriod: 10, slowPeriod: 24, signalPeriod: 6, confirmationEma: 100 };
+    if (gateReasons.includes("Profit Factor zu schwach")) parameterPatch.takeProfitPercent = 3.2;
     return {
-      objective: "Trendfolge frueher aber kontrolliert aktivieren",
-      parameterPatch: { fastPeriod: 8, slowPeriod: 21, signalPeriod: 5 },
-      rationale: [
-        "Schnellere MACD-Parameter beschleunigen die Reaktion auf Regimewechsel.",
-        "Funktioniert am besten mit strengerem Drawdown-Monitoring.",
-      ],
-      nextExperiment: "Teste einen Hoeher-Timeframe-Filter zur Vermeidung von Chop-Phasen.",
+      objective: "Trendfolge entrauschen und Whipsaws reduzieren",
+      parameterPatch,
+      rationale: dedupe([
+        ...rationale,
+        "Ein zusaetzlicher Trendfilter kann Chop-Phasen reduzieren und den Profit Factor stabilisieren.",
+        "Leicht langsamere MACD-Parameter helfen, impulsive Fehlsignale auszusortieren.",
+      ]),
+      nextExperiment: "Teste Multi-Timeframe-Bestaetigung mit 4h-Filter und 1h-Einstieg.",
     };
   }
+
   return {
-    objective: "Trendfolge robuster machen",
-    parameterPatch: { fast: 21, slow: 55 },
-    rationale: [
+    objective: "Trendfolge robuster machen und Risiko klarer begrenzen",
+    parameterPatch: { fast: 21, slow: 55, confirmationEma: 100, stopLossPercent: 2.1 },
+    rationale: dedupe([
+      ...rationale,
       "Langsamere Trendfilter reduzieren Noise und Parameter-Sensitivitaet.",
-      "Sie passen besser zu laengeren Backtests und Walk-Forward-Fenstern.",
-    ],
-    nextExperiment: "Vergleiche 4h und 1d inklusive realistisch hoeherer Slippage-Szenarien.",
+      "Ein klarerer Risikorahmen hilft, Drawdowns frueher abzufangen.",
+    ]),
+    nextExperiment: "Vergleiche 4h und 1d inklusive hoeherer Slippage-Szenarien.",
+  };
+}
+
+function buildVariantPayload(strategy: StrategyRow, optimization: OptimizationPlan, gateReasons: string[]) {
+  const variantStamp = new Date().toISOString().slice(0, 16).replace(/[T:]/g, "-");
+  const currentParameters = typeof strategy.parameters === "object" && strategy.parameters ? strategy.parameters : {};
+  const tags = Array.isArray(strategy.tags) ? strategy.tags : [];
+  const mergedTags = dedupe([
+    ...tags,
+    "agent-variant",
+    "auto-optimized",
+    ...gateReasons.map((reason) => `gate:${reason.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`),
+  ]);
+
+  return {
+    name: `${String(strategy.name ?? "Strategie")} | Variant ${variantStamp}`,
+    symbol: String(strategy.symbol ?? "BTCUSDT"),
+    timeframe: String(strategy.timeframe ?? "4h"),
+    asset_class: String(strategy.asset_class ?? "crypto"),
+    status: "draft",
+    is_champion: false,
+    description: [
+      `Agent-Variante fuer: ${String(strategy.name ?? "Strategie")}`,
+      `Ziel: ${optimization.objective}`,
+      gateReasons.length > 0 ? `Gate-Fails: ${gateReasons.join(", ")}` : null,
+      `Naechster Test: ${optimization.nextExperiment}`,
+    ].filter(Boolean).join("\n\n"),
+    parameters: {
+      ...currentParameters,
+      ...optimization.parameterPatch,
+      parentStrategyId: strategy.id,
+      optimizationObjective: optimization.objective,
+      optimizationGeneratedAt: new Date().toISOString(),
+    },
+    tags: mergedTags,
   };
 }
 
@@ -109,24 +183,49 @@ Deno.serve(async (req) => {
     }
 
     const strategyId = String(body.strategyId ?? "");
-    if (!strategyId) throw new Error("strategyId is required for analyze/optimize.");
+    if (!strategyId) throw new Error("strategyId is required for analyze/optimize/create-variant.");
 
     const { data: strategy, error: strategyError } = await supabase.from("strategies").select("*").eq("id", strategyId).single();
     if (strategyError || !strategy) throw strategyError ?? new Error("Strategy not found.");
 
     const { data: backtests } = await supabase.from("backtests").select("*").eq("strategy_id", strategy.id).order("created_at", { ascending: false }).limit(1);
     const { data: wf } = await supabase.from("walkforward_results").select("*").eq("strategy_id", strategy.id);
+    const { data: riskRules } = await supabase.from("risk_rules").select("*").or(`strategy_id.eq.${strategy.id},is_global.eq.true`).order("updated_at", { ascending: false });
     const latestBacktest = backtests?.[0] ?? null;
     const walkforward = wf ?? [];
     const scoring = scoreStrategy(latestBacktest, walkforward);
+    const qualityGate = evaluateQualityGates({
+      backtest: latestBacktest,
+      walkforward,
+      riskRule: (riskRules ?? []).find((rule) => rule.strategy_id === strategy.id) ?? (riskRules ?? []).find((rule) => rule.is_global) ?? null,
+    });
+    const optimization = buildOptimization(strategy as StrategyRow, qualityGate.reasons);
 
     if (action === "optimize") {
       return Response.json(
         {
           ok: true,
           strategy: { id: strategy.id, name: strategy.name, symbol: strategy.symbol },
-          optimization: buildOptimization(strategy),
+          optimization,
           metrics: latestBacktest,
+          qualityGate,
+        },
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
+
+    if (action === "create-variant") {
+      const payload = buildVariantPayload(strategy as StrategyRow, optimization, qualityGate.reasons);
+      const { data: variant, error: variantError } = await supabase.from("strategies").insert(payload).select("*").single();
+      if (variantError || !variant) throw variantError ?? new Error("Variant creation failed.");
+
+      return Response.json(
+        {
+          ok: true,
+          strategy: { id: strategy.id, name: strategy.name, symbol: strategy.symbol },
+          optimization,
+          qualityGate,
+          variant,
         },
         { headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
@@ -145,6 +244,8 @@ Deno.serve(async (req) => {
           "Setze fuer Live-Freigabe Mindestgrenzen fuer Sharpe, Drawdown und Walk-Forward-Passrate.",
         ],
         metrics: latestBacktest,
+        qualityGate,
+        optimization,
       },
       { headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );

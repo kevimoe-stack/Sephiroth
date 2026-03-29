@@ -1,7 +1,7 @@
-import { supabase } from "@/integrations/supabase/client";
+﻿import { supabase } from "@/integrations/supabase/client";
 
 export interface AgentAnalyzeRequest {
-  action: "analyze" | "optimize" | "bulk-analyze";
+  action: "analyze" | "optimize" | "bulk-analyze" | "create-variant";
   strategyId?: string;
 }
 
@@ -56,7 +56,7 @@ export async function runMonitorSnapshot() {
 
 export async function runAgentOrchestrator() {
   if (!supabase) {
-    throw new Error("Supabase ist nicht konfiguriert. Für den Agent-Loop wird eine Edge Function benötigt.");
+    throw new Error("Supabase ist nicht konfiguriert. Fuer den Agent-Loop wird eine Edge Function benoetigt.");
   }
   const { data, error } = await supabase.functions.invoke("agent-orchestrator");
   if (error) throw error;
@@ -65,7 +65,7 @@ export async function runAgentOrchestrator() {
 
 export async function runAgentScheduler() {
   if (!supabase) {
-    throw new Error("Supabase ist nicht konfiguriert. Für den Scheduler wird eine Edge Function benötigt.");
+    throw new Error("Supabase ist nicht konfiguriert. Fuer den Scheduler wird eine Edge Function benoetigt.");
   }
   const { data, error } = await supabase.functions.invoke("agent-scheduler");
   if (error) throw error;
@@ -74,7 +74,7 @@ export async function runAgentScheduler() {
 
 export async function runAgentRebalance() {
   if (!supabase) {
-    throw new Error("Supabase ist nicht konfiguriert. Für Rebalance wird eine Edge Function benötigt.");
+    throw new Error("Supabase ist nicht konfiguriert. Fuer Rebalance wird eine Edge Function benoetigt.");
   }
   const { data, error } = await supabase.functions.invoke("agent-rebalance");
   if (error) throw error;
@@ -83,7 +83,7 @@ export async function runAgentRebalance() {
 
 export async function runAgentRegime() {
   if (!supabase) {
-    throw new Error("Supabase ist nicht konfiguriert. Für Regime-Analyse wird eine Edge Function benötigt.");
+    throw new Error("Supabase ist nicht konfiguriert. Fuer Regime-Analyse wird eine Edge Function benoetigt.");
   }
   const { data, error } = await supabase.functions.invoke("agent-regime");
   if (error) throw error;
@@ -92,7 +92,7 @@ export async function runAgentRegime() {
 
 export async function runAgentMetaAllocation() {
   if (!supabase) {
-    throw new Error("Supabase ist nicht konfiguriert. Für Meta-Allokation wird eine Edge Function benötigt.");
+    throw new Error("Supabase ist nicht konfiguriert. Fuer Meta-Allokation wird eine Edge Function benoetigt.");
   }
   const { data, error } = await supabase.functions.invoke("agent-meta-allocation");
   if (error) throw error;
