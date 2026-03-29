@@ -4,7 +4,7 @@ import { evaluateQualityGates } from "../_shared/quality-gates.ts";
 import { runWalkForwardEngine } from "../_shared/trading-engine.ts";
 
 function removeQueueTags(tags: string[]) {
-  return tags.filter((tag) => !["candidate-ready", "needs-improvement", "validation-pending", "preferred-for-tournament", "pack-winner", "retired-variant"].includes(tag));
+  return tags.filter((tag) => !["candidate-ready", "needs-improvement", "validation-pending", "preferred-for-tournament", "pack-winner", "retired-variant", "execution-watchlist"].includes(tag));
 }
 
 function getParentStrategyId(strategy: Record<string, unknown>) {
@@ -30,6 +30,16 @@ function isRecent(createdAt: string | null | undefined, windowHours: number) {
   const parsed = Date.parse(String(createdAt ?? ""));
   if (Number.isNaN(parsed)) return false;
   return Date.now() - parsed < windowHours * 60 * 60 * 1000;
+}
+
+function qualifiesForExecutionWatchlist(backtest: Record<string, unknown> | null, passRate: number, gatePassed = true) {
+  if (!gatePassed || !backtest) return false;
+  const sharpe = Number(backtest.sharpe_ratio ?? 0);
+  const drawdown = Math.abs(Number(backtest.max_drawdown ?? 100));
+  const totalReturn = Number(backtest.total_return ?? 0);
+  const totalTrades = Number(backtest.total_trades ?? 0);
+  const profitFactor = Number(backtest.profit_factor ?? 0);
+  return sharpe >= 1.05 && drawdown <= 12 && totalReturn > 0 && totalTrades >= 25 && profitFactor >= 1.2 && passRate >= 0.6;
 }
 
 Deno.serve(async (req) => {
@@ -117,6 +127,10 @@ Deno.serve(async (req) => {
     const refreshedTags = removeQueueTags(existingTags);
     const queueTag = qualityGate.passed ? "candidate-ready" : "needs-improvement";
     let nextTags = Array.from(new Set([...refreshedTags, queueTag]));
+    const executionWatchlist = qualifiesForExecutionWatchlist(backtests?.[0] ?? null, qualityGate.passRate, qualityGate.passed);
+    if (executionWatchlist) {
+      nextTags = Array.from(new Set([...nextTags, "execution-watchlist"]));
+    }
 
     const parentStrategyId = getParentStrategyId(strategy);
     let preferredVariantId: string | null = null;
@@ -159,6 +173,7 @@ Deno.serve(async (req) => {
           const variantNextTags = Array.from(new Set([
             ...cleaned,
             ...(variant.id === preferredVariantId ? ["preferred-for-tournament", "pack-winner"] : []),
+            ...(qualifiesForExecutionWatchlist((siblingBacktests ?? []).find((item) => item.strategy_id === variant.id) ?? null, 0.6, variantTags.includes("candidate-ready")) ? ["execution-watchlist"] : []),
           ]));
           const { error: siblingUpdateError } = await supabase.from("strategies").update({ tags: variantNextTags }).eq("id", variant.id);
           if (siblingUpdateError) throw siblingUpdateError;
@@ -180,7 +195,13 @@ Deno.serve(async (req) => {
     }
 
     if (preferredVariantId === strategy.id) {
-      nextTags = Array.from(new Set([...removeQueueTags(existingTags), queueTag, "preferred-for-tournament", "pack-winner"]));
+      nextTags = Array.from(new Set([
+        ...removeQueueTags(existingTags),
+        queueTag,
+        "preferred-for-tournament",
+        "pack-winner",
+        ...(executionWatchlist ? ["execution-watchlist"] : []),
+      ]));
     }
 
     const { error: updateError } = await supabase

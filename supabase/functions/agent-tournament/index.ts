@@ -19,6 +19,11 @@ function isEligibleForTournament(strategy: Record<string, unknown>) {
   return strategy.status !== "eliminated" && (!isAgentVariant || tags.includes("candidate-ready"));
 }
 
+function hasExecutionWatchlist(strategy: Record<string, unknown>) {
+  const tags = Array.isArray(strategy.tags) ? strategy.tags.filter((tag) => typeof tag === "string") : [];
+  return tags.includes("execution-watchlist");
+}
+
 function selectBestRows(rows: Array<Record<string, unknown>>) {
   const directRows = rows.filter((row) => !(Array.isArray(row.tags) ? row.tags : []).includes("agent-variant"));
   const variantRows = rows.filter((row) => (Array.isArray(row.tags) ? row.tags : []).includes("agent-variant"));
@@ -57,13 +62,15 @@ function evaluateRow(
   const riskManagementScore = clampScore(40 + profitFactor * 12 + winRate * 0.18 + passRate * 20 - Math.max(0, drawdown - capitalProtectionThreshold) * 2);
   const kernelReasons = [...gateEvaluation.reasons];
   const passedKernel = gateEvaluation.passed;
+  const executionWatchlistBonus = hasExecutionWatchlist(strategy) ? 6 : 0;
   const fitnessScore = passedKernel
     ? clampScore(
         capitalPreservationScore * 0.35 +
           riskManagementScore * 0.25 +
           healthScore * 0.2 +
           readinessScore * 0.1 +
-          Math.min(totalReturn, 100) * 0.1,
+          Math.min(totalReturn, 100) * 0.1 +
+          executionWatchlistBonus,
       )
     : clampScore(Math.min(capitalPreservationScore, riskManagementScore) * 0.5);
 
@@ -127,6 +134,7 @@ Deno.serve(async (req) => {
       `selected:${rows.length}`,
       `kernel:${globalRiskRule ? "global-risk-rule" : "default-thresholds"}`,
       "queue:candidate-ready-only-for-agent-variants",
+      "priority:execution-watchlist-bonus",
       "selection:best-candidate-per-parent",
     ];
 

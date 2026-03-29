@@ -70,6 +70,7 @@ export default function AgentPage() {
           queueStatus,
           latestBacktest,
           parentStrategyId: getParentStrategyId(strategy),
+          executionWatchlist: (strategy.tags ?? []).includes("execution-watchlist"),
         };
       });
 
@@ -89,8 +90,8 @@ export default function AgentPage() {
         preferredForTournament: bestByParent.get(row.parentStrategyId) === row.strategy.id,
       }))
       .sort((left, right) => {
-        const leftScore = left.preferredForTournament ? 4 : left.queueStatus === "candidate-ready" ? 3 : left.queueStatus === "validation-pending" ? 2 : left.queueStatus === "awaiting-validation" ? 1 : 0;
-        const rightScore = right.preferredForTournament ? 4 : right.queueStatus === "candidate-ready" ? 3 : right.queueStatus === "validation-pending" ? 2 : right.queueStatus === "awaiting-validation" ? 1 : 0;
+        const leftScore = left.executionWatchlist ? 5 : left.preferredForTournament ? 4 : left.queueStatus === "candidate-ready" ? 3 : left.queueStatus === "validation-pending" ? 2 : left.queueStatus === "awaiting-validation" ? 1 : 0;
+        const rightScore = right.executionWatchlist ? 5 : right.preferredForTournament ? 4 : right.queueStatus === "candidate-ready" ? 3 : right.queueStatus === "validation-pending" ? 2 : right.queueStatus === "awaiting-validation" ? 1 : 0;
         return rightScore - leftScore;
       });
   }, [strategies, backtests, wf, riskRules, paperPortfolios, livePortfolios, liveOrders]);
@@ -147,7 +148,7 @@ export default function AgentPage() {
           <CardHeader><CardTitle>Candidate Queue</CardTitle></CardHeader>
           <CardContent className="space-y-4 text-sm text-slate-500">
             {candidateRows.length === 0 && <p>Noch keine Agent-Varianten in der Queue.</p>}
-            {candidateRows.map(({ strategy, gate, health, queueStatus, latestBacktest, preferredForTournament }) => (
+            {candidateRows.map(({ strategy, gate, health, queueStatus, latestBacktest, preferredForTournament, executionWatchlist }) => (
               <div key={strategy.id} className="rounded-xl bg-muted p-4">
                 <div className="flex items-center justify-between gap-3">
                   <div>
@@ -158,6 +159,7 @@ export default function AgentPage() {
                     <span className={queueStatus === "candidate-ready" ? "text-emerald-600" : queueStatus === "validation-pending" || queueStatus === "awaiting-validation" ? "text-amber-600" : queueStatus === "retired" ? "text-slate-500" : "text-red-500"}>
                       {queueStatus}
                     </span>
+                    {executionWatchlist && <span className="text-sky-600">execution-watchlist</span>}
                     {preferredForTournament && <span className="text-emerald-600">preferred-for-tournament</span>}
                   </div>
                 </div>

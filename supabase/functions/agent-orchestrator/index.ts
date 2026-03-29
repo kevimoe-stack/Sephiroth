@@ -17,6 +17,10 @@ function hasQueueTag(strategy: Record<string, unknown>, tag: string) {
   return Array.isArray(strategy.tags) && strategy.tags.includes(tag);
 }
 
+function hasExecutionWatchlistVariant(variants: Record<string, unknown>[], parentStrategyId: string) {
+  return variants.some((variant) => getParentStrategyId(variant) === parentStrategyId && hasQueueTag(variant, "execution-watchlist"));
+}
+
 function hasRecentVariant(variants: Record<string, unknown>[], parentStrategyId: string, cooldownHours: number) {
   const now = Date.now();
   return variants.some((variant) => {
@@ -148,10 +152,13 @@ Deno.serve(async (req) => {
         const operational = computeOperationalFeedback(paperPortfolio, livePortfolio, strategyOrders);
         const sharpe = Number(latestBacktest?.sharpe_ratio ?? 0);
         const totalReturn = Number(latestBacktest?.total_return ?? 0);
+        const drawdown = Math.abs(Number(latestBacktest?.max_drawdown ?? 0));
+        const readinessGap = Math.max(0, 70 - clampScore(25 + sharpe * 12 + qualityGate.passRate * 30 + (Number(latestBacktest?.total_trades ?? 0) >= 20 ? 18 : 4) - drawdown * 0.6));
         const candidateScore =
           sharpe * -12 +
-          Math.abs(Number(latestBacktest?.max_drawdown ?? 0)) * 2 +
+          drawdown * 2 +
           Math.max(0, -totalReturn) * 0.4 +
+          readinessGap * 1.4 +
           (operational.score === null ? 0 : (100 - operational.score) * 0.45) +
           operational.blockedOrders * 6 +
           operational.errorOrders * 8;
@@ -161,6 +168,7 @@ Deno.serve(async (req) => {
         if (!latestBacktest) return false;
         if (qualityGate.passed) return false;
         if (Array.isArray(strategy.tags) && strategy.tags.includes("optimizer-paused")) return false;
+        if (hasExecutionWatchlistVariant(variants, String(strategy.id))) return false;
         if (variants.some((variant) => getParentStrategyId(variant) === strategy.id && (hasQueueTag(variant, "candidate-ready") || hasQueueTag(variant, "validation-pending")))) {
           return false;
         }

@@ -33,6 +33,10 @@ function isEligibleForTournament(strategy: Strategy) {
   return strategy.status !== "eliminated" && (!isAgentVariant || tags.includes("candidate-ready"));
 }
 
+function hasExecutionWatchlist(strategy: Strategy) {
+  return (strategy.tags ?? []).includes("execution-watchlist");
+}
+
 function selectBestRows(rows: TournamentRow[]) {
   const directRows = rows.filter((row) => !(row.strategy.tags ?? []).includes("agent-variant"));
   const variantRows = rows.filter((row) => (row.strategy.tags ?? []).includes("agent-variant"));
@@ -86,6 +90,7 @@ export function evaluateTournamentRow(
   );
 
   const passedKernel = gateEvaluation.passed;
+  const executionWatchlistBonus = hasExecutionWatchlist(strategy) ? 6 : 0;
   const fitnessScore = passedKernel
     ? clampScore(
         capitalPreservationScore * 0.35 +
@@ -93,7 +98,8 @@ export function evaluateTournamentRow(
           healthScore * 0.2 +
           readinessScore * 0.1 +
           (operationalScore ?? 50) * 0.1 +
-          Math.min(returnValue, 100) * 0.1,
+          Math.min(returnValue, 100) * 0.1 +
+          executionWatchlistBonus,
       )
     : clampScore(Math.min(capitalPreservationScore, riskManagementScore) * 0.5 - blockedOrdersCount * 2);
 
