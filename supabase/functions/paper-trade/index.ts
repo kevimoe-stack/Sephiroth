@@ -1,5 +1,6 @@
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+﻿import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { corsHeaders } from "../_shared/cors.ts";
+import { evaluateQualityGates } from "../_shared/quality-gates.ts";
 
 async function fetchPrice(symbol: string) {
   const query = new URLSearchParams({ symbol });
@@ -26,10 +27,23 @@ Deno.serve(async (req) => {
     const { data: strategy, error: strategyError } = await supabase.from("strategies").select("*").eq("id", strategyId).single();
     if (strategyError || !strategy) throw strategyError ?? new Error("Strategy not found.");
 
+    const { data: latestBacktests } = await supabase.from("backtests").select("*").eq("strategy_id", strategyId).order("created_at", { ascending: false }).limit(1);
+    const { data: walkforwardRows } = await supabase.from("walkforward_results").select("*").eq("strategy_id", strategyId);
+    const { data: riskRules } = await supabase.from("risk_rules").select("*").order("updated_at", { ascending: false });
+    const globalRiskRule = (riskRules ?? []).find((rule) => rule.is_global) ?? null;
+    const gateEvaluation = evaluateQualityGates({
+      backtest: latestBacktests?.[0] ?? null,
+      walkforward: walkforwardRows ?? [],
+      riskRule: globalRiskRule,
+    });
+
     const { data: portfolios } = await supabase.from("paper_portfolio").select("*").eq("strategy_id", strategyId).order("created_at", { ascending: false }).limit(1);
     const portfolio = portfolios?.[0] ?? null;
 
     if (action === "start") {
+      if (!gateEvaluation.passed) {
+        throw new Error(`Paper trading blocked: ${gateEvaluation.reasons.join(", ")}`);
+      }
       if (portfolio?.is_active) {
         return Response.json({ ok: true, portfolio, message: "Paper portfolio already active." }, { headers: { ...corsHeaders, "Content-Type": "application/json" } });
       }
@@ -67,14 +81,16 @@ Deno.serve(async (req) => {
       const metaEntry = metaEntries?.[0] ?? null;
       const suggestedAllocation = Number(metaEntry?.suggested_allocation ?? 0.1);
 
-      const signalType = openPosition ? (hasRiskAlert || suggestedAllocation < 0.05 ? "sell" : "none") : (suggestedAllocation >= 0.08 ? "buy" : "none");
+      const signalType = openPosition
+        ? (hasRiskAlert || suggestedAllocation < 0.05 || !gateEvaluation.passed ? "sell" : "none")
+        : (gateEvaluation.passed && suggestedAllocation >= 0.08 ? "buy" : "none");
 
       const { data: signal, error: signalError } = await supabase.from("paper_signals").insert({
         strategy_id: strategyId,
         symbol: strategy.symbol,
         signal_type: signalType,
         price: currentPrice,
-        indicator_values: { suggestedAllocation, riskAlert: hasRiskAlert },
+        indicator_values: { suggestedAllocation, riskAlert: hasRiskAlert, qualityGatePassed: gateEvaluation.passed, qualityGateReasons: gateEvaluation.reasons },
       }).select().single();
       if (signalError) throw signalError;
 
@@ -122,7 +138,7 @@ Deno.serve(async (req) => {
         if (portfolioError) throw portfolioError;
       }
 
-      return Response.json({ ok: true, signalType, signal, suggestedAllocation, riskAlert: hasRiskAlert }, { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      return Response.json({ ok: true, signalType, signal, suggestedAllocation, riskAlert: hasRiskAlert, qualityGatePassed: gateEvaluation.passed, qualityGateReasons: gateEvaluation.reasons }, { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
     if (action === "stop") {

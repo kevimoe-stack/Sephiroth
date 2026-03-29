@@ -1,5 +1,6 @@
 ﻿import type { Backtest, RiskRule, Strategy, WalkforwardResult } from "@/integrations/supabase/types";
 import { computeHealth, getLatestBacktest, getWalkforwardRows } from "@/lib/analytics";
+import { evaluateQualityGates } from "@/lib/quality-gates";
 
 export interface TournamentRow {
   strategy: Strategy;
@@ -29,19 +30,12 @@ export function evaluateTournamentRow(
   const walkforwardRows = getWalkforwardRows(walkforward, strategy.id);
   const { healthScore, readinessScore, passRate } = computeHealth(strategy, backtests, walkforward);
   const maxDrawdown = Math.abs(backtest?.max_drawdown ?? 100);
-  const totalTrades = backtest?.total_trades ?? 0;
-  const sharpe = backtest?.sharpe_ratio ?? 0;
   const returnValue = backtest?.total_return ?? 0;
   const profitFactor = backtest?.profit_factor ?? 0;
   const winRate = backtest?.win_rate ?? 0;
-
-  const capitalProtectionThreshold = Math.max(12, (riskRule?.max_daily_loss ?? 0.05) * 350);
-  const kernelReasons: string[] = [];
-  if (!backtest) kernelReasons.push("Kein Backtest");
-  if (maxDrawdown > capitalProtectionThreshold) kernelReasons.push("Drawdown zu hoch");
-  if (passRate < 0.4) kernelReasons.push("Walk-Forward zu instabil");
-  if (totalTrades < 15) kernelReasons.push("Zu wenige Trades");
-  if (sharpe < 0.8) kernelReasons.push("Sharpe unter Mindestniveau");
+  const gateEvaluation = evaluateQualityGates(backtest, walkforwardRows, riskRule);
+  const capitalProtectionThreshold = gateEvaluation.thresholds.maxDrawdown;
+  const kernelReasons = [...gateEvaluation.reasons];
 
   const capitalPreservationScore = clampScore(100 - maxDrawdown * 3.2 + passRate * 15);
   const riskManagementScore = clampScore(
@@ -52,7 +46,7 @@ export function evaluateTournamentRow(
       Math.max(0, maxDrawdown - capitalProtectionThreshold) * 2,
   );
 
-  const passedKernel = kernelReasons.length === 0;
+  const passedKernel = gateEvaluation.passed;
   const fitnessScore = passedKernel
     ? clampScore(
         capitalPreservationScore * 0.35 +

@@ -1,5 +1,6 @@
 ﻿import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { corsHeaders } from "../_shared/cors.ts";
+import { evaluateQualityGates } from "../_shared/quality-gates.ts";
 
 function clampScore(value: number) {
   return Math.max(0, Math.min(100, Math.round(value)));
@@ -11,31 +12,21 @@ function evaluateRow(
   walkforward: Array<Record<string, unknown>>,
   riskRule: Record<string, unknown> | null,
 ) {
-  const passRate =
-    walkforward.length === 0
-      ? 0
-      : walkforward.filter((row) => Boolean(row.passed)).length / walkforward.length;
+  const gateEvaluation = evaluateQualityGates({ backtest, walkforward, riskRule });
+  const passRate = gateEvaluation.passRate;
   const sharpe = Number(backtest?.sharpe_ratio ?? 0);
   const winRate = Number(backtest?.win_rate ?? 0);
   const totalReturn = Number(backtest?.total_return ?? 0);
   const drawdown = Math.abs(Number(backtest?.max_drawdown ?? 100));
-  const totalTrades = Number(backtest?.total_trades ?? 0);
   const profitFactor = Number(backtest?.profit_factor ?? 0);
-  const capitalProtectionThreshold = Math.max(12, Number(riskRule?.max_daily_loss ?? 0.05) * 350);
+  const capitalProtectionThreshold = gateEvaluation.thresholds.maxDrawdown;
 
   const healthScore = clampScore(45 + sharpe * 14 + winRate * 0.18 + totalReturn * 0.1 - drawdown * 0.7 + passRate * 18);
-  const readinessScore = clampScore(25 + sharpe * 12 + passRate * 30 + (totalTrades >= 20 ? 18 : 4) - drawdown * 0.6);
+  const readinessScore = clampScore(25 + sharpe * 12 + passRate * 30 + (Number(backtest?.total_trades ?? 0) >= 20 ? 18 : 4) - drawdown * 0.6);
   const capitalPreservationScore = clampScore(100 - drawdown * 3.2 + passRate * 15);
   const riskManagementScore = clampScore(40 + profitFactor * 12 + winRate * 0.18 + passRate * 20 - Math.max(0, drawdown - capitalProtectionThreshold) * 2);
-
-  const kernelReasons: string[] = [];
-  if (!backtest) kernelReasons.push("Kein Backtest");
-  if (drawdown > capitalProtectionThreshold) kernelReasons.push("Drawdown zu hoch");
-  if (passRate < 0.4) kernelReasons.push("Walk-Forward zu instabil");
-  if (totalTrades < 15) kernelReasons.push("Zu wenige Trades");
-  if (sharpe < 0.8) kernelReasons.push("Sharpe unter Mindestniveau");
-
-  const passedKernel = kernelReasons.length === 0;
+  const kernelReasons = [...gateEvaluation.reasons];
+  const passedKernel = gateEvaluation.passed;
   const fitnessScore = passedKernel
     ? clampScore(
         capitalPreservationScore * 0.35 +
@@ -72,27 +63,16 @@ Deno.serve(async (req) => {
     }
 
     const supabase = createClient(supabaseUrl, serviceRoleKey);
-    const { data: strategies, error: strategiesError } = await supabase
-      .from("strategies")
-      .select("*")
-      .neq("status", "eliminated");
+    const { data: strategies, error: strategiesError } = await supabase.from("strategies").select("*").neq("status", "eliminated");
     if (strategiesError) throw strategiesError;
 
-    const { data: backtests, error: backtestsError } = await supabase
-      .from("backtests")
-      .select("*")
-      .order("created_at", { ascending: false });
+    const { data: backtests, error: backtestsError } = await supabase.from("backtests").select("*").order("created_at", { ascending: false });
     if (backtestsError) throw backtestsError;
 
-    const { data: walkforward, error: walkforwardError } = await supabase
-      .from("walkforward_results")
-      .select("*");
+    const { data: walkforward, error: walkforwardError } = await supabase.from("walkforward_results").select("*");
     if (walkforwardError) throw walkforwardError;
 
-    const { data: riskRules, error: riskError } = await supabase
-      .from("risk_rules")
-      .select("*")
-      .order("updated_at", { ascending: false });
+    const { data: riskRules, error: riskError } = await supabase.from("risk_rules").select("*").order("updated_at", { ascending: false });
     if (riskError) throw riskError;
 
     const globalRiskRule = (riskRules ?? []).find((rule) => Boolean(rule.is_global)) ?? null;
