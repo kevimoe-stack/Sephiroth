@@ -8,6 +8,13 @@ import { computeHealth } from "@/lib/analytics";
 import { evaluateQualityGates } from "@/lib/quality-gates";
 import { formatNumber } from "@/lib/utils";
 
+function getParentStrategyId(strategy: { parameters?: Record<string, unknown> | null; id: string }) {
+  const parameters = strategy.parameters;
+  if (!parameters || typeof parameters !== "object" || Array.isArray(parameters)) return strategy.id;
+  const parentStrategyId = parameters.parentStrategyId;
+  return typeof parentStrategyId === "string" && parentStrategyId.length > 0 ? parentStrategyId : strategy.id;
+}
+
 export default function AgentPage() {
   const { data: strategies = [] } = useStrategies();
   const { data: backtests = [] } = useBacktests();
@@ -36,7 +43,7 @@ export default function AgentPage() {
   }));
 
   const candidateRows = useMemo(() => {
-    return strategies
+    const rows = strategies
       .filter((strategy) => (strategy.tags ?? []).includes("agent-variant") || (strategy.tags ?? []).includes("candidate-ready") || (strategy.tags ?? []).includes("needs-improvement"))
       .map((strategy) => {
         const latestBacktest = backtests.find((backtest) => backtest.strategy_id === strategy.id) ?? null;
@@ -53,11 +60,28 @@ export default function AgentPage() {
           gate,
           queueStatus,
           latestBacktest,
+          parentStrategyId: getParentStrategyId(strategy),
         };
-      })
+      });
+
+    const bestByParent = new Map<string, string>();
+    rows
+      .filter((row) => row.queueStatus === "candidate-ready")
+      .sort((left, right) => Number(right.latestBacktest?.sharpe_ratio ?? 0) - Number(left.latestBacktest?.sharpe_ratio ?? 0))
+      .forEach((row) => {
+        if (!bestByParent.has(row.parentStrategyId)) {
+          bestByParent.set(row.parentStrategyId, row.strategy.id);
+        }
+      });
+
+    return rows
+      .map((row) => ({
+        ...row,
+        preferredForTournament: bestByParent.get(row.parentStrategyId) === row.strategy.id,
+      }))
       .sort((left, right) => {
-        const leftScore = left.queueStatus === "candidate-ready" ? 2 : left.queueStatus === "validation-pending" ? 1 : 0;
-        const rightScore = right.queueStatus === "candidate-ready" ? 2 : right.queueStatus === "validation-pending" ? 1 : 0;
+        const leftScore = left.preferredForTournament ? 3 : left.queueStatus === "candidate-ready" ? 2 : left.queueStatus === "validation-pending" ? 1 : 0;
+        const rightScore = right.preferredForTournament ? 3 : right.queueStatus === "candidate-ready" ? 2 : right.queueStatus === "validation-pending" ? 1 : 0;
         return rightScore - leftScore;
       });
   }, [strategies, backtests, wf, riskRules]);
@@ -112,16 +136,19 @@ export default function AgentPage() {
           <CardHeader><CardTitle>Candidate Queue</CardTitle></CardHeader>
           <CardContent className="space-y-4 text-sm text-slate-500">
             {candidateRows.length === 0 && <p>Noch keine Agent-Varianten in der Queue.</p>}
-            {candidateRows.map(({ strategy, gate, queueStatus, latestBacktest }) => (
+            {candidateRows.map(({ strategy, gate, queueStatus, latestBacktest, preferredForTournament }) => (
               <div key={strategy.id} className="rounded-xl bg-muted p-4">
                 <div className="flex items-center justify-between gap-3">
                   <div>
                     <p className="font-medium text-foreground">{strategy.name}</p>
                     <p>{strategy.symbol} | {strategy.timeframe}</p>
                   </div>
-                  <span className={queueStatus === "candidate-ready" ? "text-emerald-600" : queueStatus === "validation-pending" ? "text-amber-600" : "text-red-500"}>
-                    {queueStatus}
-                  </span>
+                  <div className="flex flex-col items-end gap-1">
+                    <span className={queueStatus === "candidate-ready" ? "text-emerald-600" : queueStatus === "validation-pending" ? "text-amber-600" : "text-red-500"}>
+                      {queueStatus}
+                    </span>
+                    {preferredForTournament && <span className="text-emerald-600">preferred-for-tournament</span>}
+                  </div>
                 </div>
                 <p className="mt-2">Sharpe {formatNumber(latestBacktest?.sharpe_ratio)} | Trades {formatNumber(latestBacktest?.total_trades ?? 0, 0)}</p>
                 {gate.reasons.length > 0 ? (

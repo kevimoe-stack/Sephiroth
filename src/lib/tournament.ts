@@ -20,10 +20,33 @@ function clampScore(value: number) {
   return Math.max(0, Math.min(100, Math.round(value)));
 }
 
+function getParentStrategyId(strategy: Strategy) {
+  const parameters = strategy.parameters;
+  if (!parameters || typeof parameters !== "object" || Array.isArray(parameters)) return null;
+  const parentStrategyId = parameters.parentStrategyId;
+  return typeof parentStrategyId === "string" && parentStrategyId.length > 0 ? parentStrategyId : null;
+}
+
 function isEligibleForTournament(strategy: Strategy) {
   const tags = strategy.tags ?? [];
   const isAgentVariant = tags.includes("agent-variant");
   return strategy.status !== "eliminated" && (!isAgentVariant || tags.includes("candidate-ready"));
+}
+
+function selectBestRows(rows: TournamentRow[]) {
+  const directRows = rows.filter((row) => !(row.strategy.tags ?? []).includes("agent-variant"));
+  const variantRows = rows.filter((row) => (row.strategy.tags ?? []).includes("agent-variant"));
+  const bestVariantByParent = new Map<string, TournamentRow>();
+
+  for (const row of variantRows) {
+    const parentStrategyId = getParentStrategyId(row.strategy) ?? row.strategy.id;
+    const existing = bestVariantByParent.get(parentStrategyId);
+    if (!existing || row.fitnessScore > existing.fitnessScore) {
+      bestVariantByParent.set(parentStrategyId, row);
+    }
+  }
+
+  return [...directRows, ...bestVariantByParent.values()].sort((left, right) => right.fitnessScore - left.fitnessScore);
 }
 
 export function evaluateTournamentRow(
@@ -85,10 +108,11 @@ export function buildTournamentBoard(
   riskRules: RiskRule[],
 ) {
   const globalRiskRule = riskRules.find((rule) => rule.is_global) ?? null;
-  const rows = strategies
+  const eligibleRows = strategies
     .filter(isEligibleForTournament)
     .map((strategy) => evaluateTournamentRow(strategy, backtests, walkforward, globalRiskRule))
     .sort((left, right) => right.fitnessScore - left.fitnessScore);
+  const rows = selectBestRows(eligibleRows);
 
   return {
     rows,

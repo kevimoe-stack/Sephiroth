@@ -6,10 +6,33 @@ function clampScore(value: number) {
   return Math.max(0, Math.min(100, Math.round(value)));
 }
 
+function getParentStrategyId(strategy: Record<string, unknown>) {
+  const parameters = strategy.parameters;
+  if (!parameters || typeof parameters !== "object" || Array.isArray(parameters)) return null;
+  const parentStrategyId = (parameters as Record<string, unknown>).parentStrategyId;
+  return typeof parentStrategyId === "string" && parentStrategyId.length > 0 ? parentStrategyId : null;
+}
+
 function isEligibleForTournament(strategy: Record<string, unknown>) {
   const tags = Array.isArray(strategy.tags) ? strategy.tags.filter((tag) => typeof tag === "string") : [];
   const isAgentVariant = tags.includes("agent-variant");
   return strategy.status !== "eliminated" && (!isAgentVariant || tags.includes("candidate-ready"));
+}
+
+function selectBestRows(rows: Array<Record<string, unknown>>) {
+  const directRows = rows.filter((row) => !(Array.isArray(row.tags) ? row.tags : []).includes("agent-variant"));
+  const variantRows = rows.filter((row) => (Array.isArray(row.tags) ? row.tags : []).includes("agent-variant"));
+  const bestVariantByParent = new Map<string, Record<string, unknown>>();
+
+  for (const row of variantRows) {
+    const parentStrategyId = typeof row.parent_strategy_id === "string" && row.parent_strategy_id.length > 0 ? row.parent_strategy_id : String(row.strategy_id);
+    const existing = bestVariantByParent.get(parentStrategyId);
+    if (!existing || Number(row.fitness_score ?? 0) > Number(existing.fitness_score ?? 0)) {
+      bestVariantByParent.set(parentStrategyId, row);
+    }
+  }
+
+  return [...directRows, ...bestVariantByParent.values()].sort((left, right) => Number(right.fitness_score ?? 0) - Number(left.fitness_score ?? 0));
 }
 
 function evaluateRow(
@@ -26,6 +49,7 @@ function evaluateRow(
   const drawdown = Math.abs(Number(backtest?.max_drawdown ?? 100));
   const profitFactor = Number(backtest?.profit_factor ?? 0);
   const capitalProtectionThreshold = gateEvaluation.thresholds.maxDrawdown;
+  const tags = Array.isArray(strategy.tags) ? strategy.tags.filter((tag) => typeof tag === "string") : [];
 
   const healthScore = clampScore(45 + sharpe * 14 + winRate * 0.18 + totalReturn * 0.1 - drawdown * 0.7 + passRate * 18);
   const readinessScore = clampScore(25 + sharpe * 12 + passRate * 30 + (Number(backtest?.total_trades ?? 0) >= 20 ? 18 : 4) - drawdown * 0.6);
@@ -45,7 +69,9 @@ function evaluateRow(
 
   return {
     strategy_id: String(strategy.id),
+    parent_strategy_id: getParentStrategyId(strategy),
     strategy_name: String(strategy.name),
+    tags,
     health_score: healthScore,
     readiness_score: readinessScore,
     capital_preservation_score: capitalPreservationScore,
@@ -83,22 +109,25 @@ Deno.serve(async (req) => {
 
     const eligibleStrategies = (strategies ?? []).filter(isEligibleForTournament);
     const globalRiskRule = (riskRules ?? []).find((rule) => Boolean(rule.is_global)) ?? null;
-    const rows = eligibleStrategies
+    const evaluatedRows = eligibleStrategies
       .map((strategy) => {
         const backtest = (backtests ?? []).find((item) => item.strategy_id === strategy.id) ?? null;
         const wfRows = (walkforward ?? []).filter((item) => item.strategy_id === strategy.id);
         return evaluateRow(strategy, backtest, wfRows, globalRiskRule);
       })
-      .sort((left, right) => right.fitness_score - left.fitness_score);
+      .sort((left, right) => Number(right.fitness_score ?? 0) - Number(left.fitness_score ?? 0));
+    const rows = selectBestRows(evaluatedRows);
 
-    const qualifiedRows = rows.filter((row) => row.passed_kernel);
+    const qualifiedRows = rows.filter((row) => Boolean(row.passed_kernel));
     const champion = qualifiedRows[0] ?? null;
     const challenger = qualifiedRows[1] ?? null;
     const runNotes = [
       `qualified:${qualifiedRows.length}`,
       `eligible:${eligibleStrategies.length}`,
+      `selected:${rows.length}`,
       `kernel:${globalRiskRule ? "global-risk-rule" : "default-thresholds"}`,
       "queue:candidate-ready-only-for-agent-variants",
+      "selection:best-candidate-per-parent",
     ];
 
     const { data: insertedRun, error: runError } = await supabase
