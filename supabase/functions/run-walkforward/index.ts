@@ -4,7 +4,26 @@ import { evaluateQualityGates } from "../_shared/quality-gates.ts";
 import { runWalkForwardEngine } from "../_shared/trading-engine.ts";
 
 function removeQueueTags(tags: string[]) {
-  return tags.filter((tag) => !["candidate-ready", "needs-improvement", "validation-pending"].includes(tag));
+  return tags.filter((tag) => !["candidate-ready", "needs-improvement", "validation-pending", "preferred-for-tournament", "pack-winner"].includes(tag));
+}
+
+function getParentStrategyId(strategy: Record<string, unknown>) {
+  const parameters = strategy.parameters;
+  if (!parameters || typeof parameters !== "object" || Array.isArray(parameters)) return null;
+  const parentStrategyId = (parameters as Record<string, unknown>).parentStrategyId;
+  return typeof parentStrategyId === "string" && parentStrategyId.length > 0 ? parentStrategyId : null;
+}
+
+function compareCandidates(left: Record<string, unknown>, right: Record<string, unknown>) {
+  const leftSharpe = Number(left.sharpe_ratio ?? 0);
+  const rightSharpe = Number(right.sharpe_ratio ?? 0);
+  if (rightSharpe !== leftSharpe) return rightSharpe - leftSharpe;
+  const leftReturn = Number(left.total_return ?? 0);
+  const rightReturn = Number(right.total_return ?? 0);
+  if (rightReturn !== leftReturn) return rightReturn - leftReturn;
+  const leftTrades = Number(left.total_trades ?? 0);
+  const rightTrades = Number(right.total_trades ?? 0);
+  return rightTrades - leftTrades;
 }
 
 Deno.serve(async (req) => {
@@ -91,7 +110,55 @@ Deno.serve(async (req) => {
     const existingTags = Array.isArray(strategy.tags) ? strategy.tags.filter((tag) => typeof tag === "string") : [];
     const refreshedTags = removeQueueTags(existingTags);
     const queueTag = qualityGate.passed ? "candidate-ready" : "needs-improvement";
-    const nextTags = Array.from(new Set([...refreshedTags, queueTag]));
+    let nextTags = Array.from(new Set([...refreshedTags, queueTag]));
+
+    const parentStrategyId = getParentStrategyId(strategy);
+    let preferredVariantId: string | null = null;
+
+    if (parentStrategyId) {
+      const { data: siblingStrategies, error: siblingError } = await supabase
+        .from("strategies")
+        .select("*")
+        .contains("tags", ["agent-variant"]);
+      if (siblingError) throw siblingError;
+
+      const variantsForParent = (siblingStrategies ?? []).filter((item) => getParentStrategyId(item) === parentStrategyId);
+      const readyVariants = variantsForParent.filter((item) => Array.isArray(item.tags) && item.tags.includes("candidate-ready"));
+
+      if (readyVariants.length > 0) {
+        const { data: siblingBacktests, error: siblingBacktestsError } = await supabase
+          .from("backtests")
+          .select("*")
+          .in("strategy_id", readyVariants.map((item) => item.id))
+          .order("created_at", { ascending: false });
+        if (siblingBacktestsError) throw siblingBacktestsError;
+
+        const latestByVariant = readyVariants.map((variant) => ({
+          variant,
+          backtest: (siblingBacktests ?? []).find((item) => item.strategy_id === variant.id) ?? null,
+        }));
+
+        latestByVariant.sort((left, right) => compareCandidates(left.backtest ?? {}, right.backtest ?? {}));
+        preferredVariantId = latestByVariant[0]?.variant.id ?? null;
+
+        for (const variant of variantsForParent) {
+          const variantTags = Array.isArray(variant.tags) ? variant.tags.filter((tag) => typeof tag === "string") : [];
+          const cleaned = removeQueueTags(variantTags).concat(
+            variantTags.includes("candidate-ready") ? ["candidate-ready"] : variantTags.includes("needs-improvement") ? ["needs-improvement"] : [],
+          );
+          const variantNextTags = Array.from(new Set([
+            ...cleaned,
+            ...(variant.id === preferredVariantId ? ["preferred-for-tournament", "pack-winner"] : []),
+          ]));
+          const { error: siblingUpdateError } = await supabase.from("strategies").update({ tags: variantNextTags }).eq("id", variant.id);
+          if (siblingUpdateError) throw siblingUpdateError;
+        }
+      }
+    }
+
+    if (preferredVariantId === strategy.id) {
+      nextTags = Array.from(new Set([...removeQueueTags(existingTags), queueTag, "preferred-for-tournament", "pack-winner"]));
+    }
 
     const { error: updateError } = await supabase
       .from("strategies")
@@ -109,6 +176,7 @@ Deno.serve(async (req) => {
         results: data ?? [],
         qualityGate,
         queueStatus: queueTag,
+        preferredVariantId,
       },
       { headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
