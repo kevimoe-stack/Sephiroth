@@ -20,6 +20,12 @@ function clampScore(value: number) {
   return Math.max(0, Math.min(100, Math.round(value)));
 }
 
+function isEligibleForTournament(strategy: Strategy) {
+  const tags = strategy.tags ?? [];
+  const isAgentVariant = tags.includes("agent-variant");
+  return strategy.status !== "eliminated" && (!isAgentVariant || tags.includes("candidate-ready"));
+}
+
 export function evaluateTournamentRow(
   strategy: Strategy,
   backtests: Backtest[],
@@ -80,7 +86,7 @@ export function buildTournamentBoard(
 ) {
   const globalRiskRule = riskRules.find((rule) => rule.is_global) ?? null;
   const rows = strategies
-    .filter((strategy) => strategy.status !== "eliminated")
+    .filter(isEligibleForTournament)
     .map((strategy) => evaluateTournamentRow(strategy, backtests, walkforward, globalRiskRule))
     .sort((left, right) => right.fitnessScore - left.fitnessScore);
 

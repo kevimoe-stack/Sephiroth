@@ -6,6 +6,12 @@ function clampScore(value: number) {
   return Math.max(0, Math.min(100, Math.round(value)));
 }
 
+function isEligibleForTournament(strategy: Record<string, unknown>) {
+  const tags = Array.isArray(strategy.tags) ? strategy.tags.filter((tag) => typeof tag === "string") : [];
+  const isAgentVariant = tags.includes("agent-variant");
+  return strategy.status !== "eliminated" && (!isAgentVariant || tags.includes("candidate-ready"));
+}
+
 function evaluateRow(
   strategy: Record<string, unknown>,
   backtest: Record<string, unknown> | null,
@@ -75,8 +81,9 @@ Deno.serve(async (req) => {
     const { data: riskRules, error: riskError } = await supabase.from("risk_rules").select("*").order("updated_at", { ascending: false });
     if (riskError) throw riskError;
 
+    const eligibleStrategies = (strategies ?? []).filter(isEligibleForTournament);
     const globalRiskRule = (riskRules ?? []).find((rule) => Boolean(rule.is_global)) ?? null;
-    const rows = (strategies ?? [])
+    const rows = eligibleStrategies
       .map((strategy) => {
         const backtest = (backtests ?? []).find((item) => item.strategy_id === strategy.id) ?? null;
         const wfRows = (walkforward ?? []).filter((item) => item.strategy_id === strategy.id);
@@ -89,7 +96,9 @@ Deno.serve(async (req) => {
     const challenger = qualifiedRows[1] ?? null;
     const runNotes = [
       `qualified:${qualifiedRows.length}`,
+      `eligible:${eligibleStrategies.length}`,
       `kernel:${globalRiskRule ? "global-risk-rule" : "default-thresholds"}`,
+      "queue:candidate-ready-only-for-agent-variants",
     ];
 
     const { data: insertedRun, error: runError } = await supabase
@@ -134,6 +143,7 @@ Deno.serve(async (req) => {
         champion,
         challenger,
         rows,
+        eligibleCandidates: eligibleStrategies.length,
       },
       { headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
