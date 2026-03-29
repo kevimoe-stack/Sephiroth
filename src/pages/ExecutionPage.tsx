@@ -200,6 +200,12 @@ export default function ExecutionPage() {
                   <p className="mt-1">Mode {executeTrade.data.executionMode}</p>
                 </div>
               )}
+              {!executeTrade.data?.order && (
+                <div className="rounded-xl bg-muted p-4">
+                  <p className="font-medium text-foreground">Execution Modus</p>
+                  <p className="mt-1">Aktuell vorbereiteter Pfad: Simulation oder Dry-Run. Mit Binance Testnet Secrets schaltet der Modus spaeter auf <span className="font-medium text-foreground">testnet-dry-run</span>.</p>
+                </div>
+              )}
               {activeLive.map((portfolio) => (
                 <div key={portfolio.id} className="rounded-xl bg-muted p-4">
                   <p className="font-medium text-foreground">Portfolio {portfolio.id}</p>

@@ -10,6 +10,16 @@ async function fetchPrice(symbol: string) {
   return Number(payload.price);
 }
 
+function getExecutionMode() {
+  const apiKey = Deno.env.get("BINANCE_API_KEY") ?? "";
+  const apiSecret = Deno.env.get("BINANCE_API_SECRET") ?? "";
+  const testnetFlag = String(Deno.env.get("BINANCE_TESTNET") ?? "").toLowerCase();
+  const isTestnet = ["1", "true", "yes", "on"].includes(testnetFlag);
+  if (apiKey && apiSecret && isTestnet) return "testnet-dry-run";
+  if (apiKey && apiSecret) return "configured-dry-run";
+  return "simulation";
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
@@ -40,7 +50,7 @@ Deno.serve(async (req) => {
     const { data: portfolios } = await supabase.from("live_portfolios").select("*").eq("strategy_id", strategyId).order("created_at", { ascending: false }).limit(1);
     const portfolio = portfolios?.[0] ?? null;
     const currentPrice = await fetchPrice(String(strategy.symbol));
-    const executionMode = Deno.env.get("BINANCE_API_KEY") && Deno.env.get("BINANCE_API_SECRET") ? "configured-dry-run" : "simulation";
+    const executionMode = getExecutionMode();
 
     if (action === "start") {
       if (!gateEvaluation.passed) {
@@ -53,7 +63,7 @@ Deno.serve(async (req) => {
       const { data, error } = await supabase.from("live_portfolios").insert({
         strategy_id: strategyId,
         exchange: "binance",
-        api_key_name: executionMode === "configured-dry-run" ? "configured-dry-run" : "simulation",
+        api_key_name: executionMode,
         initial_capital: initialCapital,
         current_capital: initialCapital,
         is_active: true,
@@ -88,7 +98,7 @@ Deno.serve(async (req) => {
       const { data: order, error: orderError } = await supabase.from("live_orders").insert({
         portfolio_id: portfolio.id,
         strategy_id: strategyId,
-        exchange_order_id: executionMode === "simulation" ? `sim-${crypto.randomUUID()}` : `dry-${crypto.randomUUID()}`,
+        exchange_order_id: executionMode === "simulation" ? `sim-${crypto.randomUUID()}` : executionMode === "testnet-dry-run" ? `test-${crypto.randomUUID()}` : `dry-${crypto.randomUUID()}`,
         symbol: strategy.symbol,
         side,
         order_type: "market",

@@ -53,7 +53,7 @@ npm run check:vercel
 2. Alle Migrationen in `supabase/migrations/` anwenden.
 3. Alle Functions in `supabase/functions/` deployen.
 4. Secrets setzen: mindestens `SUPABASE_SERVICE_ROLE_KEY`.
-5. Fuer spaetere Testnet-/Live-Ausfuehrung `BINANCE_API_KEY`, `BINANCE_API_SECRET` und optionale Ops-Secrets setzen.
+5. Fuer spaetere Testnet-/Live-Ausfuehrung `BINANCE_API_KEY`, `BINANCE_API_SECRET`, `BINANCE_TESTNET=true` und optionale Ops-Secrets setzen.
 6. Erst Paper Trading, dann Dry-Run Execution, dann Testnet, erst danach echtes Live.
 
 ## Operative Gates vor Live-Kapital
@@ -74,6 +74,8 @@ Vor Binance Testnet sollte Sephiroth mindestens folgendes sauber anzeigen:
 - Scheduler-/Orchestrator-Loop und Meta-Allokation vorhanden
 - keine kritischen Alerts offen
 - Binance Testnet Keys nur serverseitig in Supabase Secrets
+
+Wenn `BINANCE_API_KEY`, `BINANCE_API_SECRET` und `BINANCE_TESTNET=true` serverseitig gesetzt sind, meldet die Execution-Schicht den Modus `testnet-dry-run`.
 
 ## Noch offen fuer echtes Production-Live
 
