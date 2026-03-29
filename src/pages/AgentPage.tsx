@@ -175,6 +175,14 @@ export default function AgentPage() {
                   <div className="mt-2 space-y-1">
                     <p>Diese Variante wurde nach wiederholtem Scheitern aus der automatischen Optimizer-Schleife genommen.</p>
                   </div>
+                ) : queueStatus === "awaiting-validation" ? (
+                  <div className="mt-2 space-y-1">
+                    <p>Backtest steht noch aus. Diese Variante wartet noch auf den ersten Validierungslauf.</p>
+                  </div>
+                ) : queueStatus === "validation-pending" ? (
+                  <div className="mt-2 space-y-1">
+                    <p>Backtest ist vorhanden, aber der Walk-Forward-Lauf ist noch nicht vollstaendig abgeschlossen.</p>
+                  </div>
                 ) : gate.reasons.length > 0 ? (
                   <div className="mt-2 space-y-1">
                     {gate.reasons.map((reason) => <p key={reason} className="text-red-500">{reason}</p>)}
