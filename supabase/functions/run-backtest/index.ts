@@ -1,6 +1,10 @@
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+﻿import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { corsHeaders } from "../_shared/cors.ts";
 import { runBacktestEngine } from "../_shared/trading-engine.ts";
+
+function removeQueueTags(tags: string[]) {
+  return tags.filter((tag) => !["candidate-ready", "needs-improvement", "validation-pending"].includes(tag));
+}
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -83,6 +87,16 @@ Deno.serve(async (req) => {
       if (tradesError) {
         throw tradesError;
       }
+    }
+
+    const existingTags = Array.isArray(strategy.tags) ? strategy.tags.filter((tag) => typeof tag === "string") : [];
+    const nextTags = strategy.tags && existingTags.includes("agent-variant")
+      ? Array.from(new Set([...removeQueueTags(existingTags), "validation-pending"]))
+      : strategy.tags;
+
+    if (nextTags !== strategy.tags) {
+      const { error: updateError } = await supabase.from("strategies").update({ tags: nextTags }).eq("id", strategy.id);
+      if (updateError) throw updateError;
     }
 
     return Response.json(

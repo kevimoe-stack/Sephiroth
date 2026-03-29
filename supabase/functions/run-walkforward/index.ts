@@ -1,6 +1,11 @@
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+﻿import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { corsHeaders } from "../_shared/cors.ts";
+import { evaluateQualityGates } from "../_shared/quality-gates.ts";
 import { runWalkForwardEngine } from "../_shared/trading-engine.ts";
+
+function removeQueueTags(tags: string[]) {
+  return tags.filter((tag) => !["candidate-ready", "needs-improvement", "validation-pending"].includes(tag));
+}
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -61,11 +66,49 @@ Deno.serve(async (req) => {
       throw error;
     }
 
+    const { data: backtests, error: backtestError } = await supabase
+      .from("backtests")
+      .select("*")
+      .eq("strategy_id", strategy.id)
+      .order("created_at", { ascending: false })
+      .limit(1);
+    if (backtestError) throw backtestError;
+
+    const { data: riskRules, error: riskError } = await supabase
+      .from("risk_rules")
+      .select("*")
+      .or(`strategy_id.eq.${strategy.id},is_global.eq.true`)
+      .order("updated_at", { ascending: false });
+    if (riskError) throw riskError;
+
+    const selectedRiskRule = (riskRules ?? []).find((rule) => rule.strategy_id === strategy.id) ?? (riskRules ?? []).find((rule) => rule.is_global) ?? null;
+    const qualityGate = evaluateQualityGates({
+      backtest: backtests?.[0] ?? null,
+      walkforward: data ?? [],
+      riskRule: selectedRiskRule,
+    });
+
+    const existingTags = Array.isArray(strategy.tags) ? strategy.tags.filter((tag) => typeof tag === "string") : [];
+    const refreshedTags = removeQueueTags(existingTags);
+    const queueTag = qualityGate.passed ? "candidate-ready" : "needs-improvement";
+    const nextTags = Array.from(new Set([...refreshedTags, queueTag]));
+
+    const { error: updateError } = await supabase
+      .from("strategies")
+      .update({
+        tags: nextTags,
+        status: qualityGate.passed && existingTags.includes("agent-variant") ? "active" : strategy.status,
+      })
+      .eq("id", strategy.id);
+    if (updateError) throw updateError;
+
     return Response.json(
       {
         ok: true,
         windows: data?.length ?? 0,
         results: data ?? [],
+        qualityGate,
+        queueStatus: queueTag,
       },
       { headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
