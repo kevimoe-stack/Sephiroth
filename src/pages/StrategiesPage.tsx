@@ -1,8 +1,8 @@
-import { Search } from "lucide-react";
+﻿import { Search } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { CreateStrategyDialog } from "@/components/strategies/CreateStrategyDialog";
 import { BulkOperationsDialog } from "@/components/strategies/BulkOperationsDialog";
+import { CreateStrategyDialog } from "@/components/strategies/CreateStrategyDialog";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -38,7 +38,7 @@ export default function StrategiesPage() {
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <CardTitle>{strategy.name}</CardTitle>
-                    <p className="mt-1 text-sm text-slate-500">{strategy.symbol} · {strategy.timeframe}</p>
+                    <p className="mt-1 text-sm text-slate-500">{strategy.symbol} | {strategy.timeframe}</p>
                   </div>
                   {strategy.is_champion && <Badge variant="success">Champion</Badge>}
                 </div>

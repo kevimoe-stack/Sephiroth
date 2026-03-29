@@ -1,5 +1,5 @@
 ﻿import { useMemo, useState } from "react";
-import { useParams } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import { toast } from "sonner";
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { Badge } from "@/components/ui/badge";
@@ -26,6 +26,7 @@ function getLatestBacktest<T extends { created_at?: string }>(rows: T[]) {
 
 export default function StrategyDetailPage() {
   const { id } = useParams();
+  const navigate = useNavigate();
   const { data: strategies = [] } = useStrategies();
   const { data: backtests = [] } = useBacktests();
   const { data: walkforward = [] } = useWalkforwardResults();
@@ -44,6 +45,8 @@ export default function StrategyDetailPage() {
   const [windows, setWindows] = useState(4);
   const [analysisResult, setAnalysisResult] = useState<Record<string, any> | null>(null);
   const [optimizationResult, setOptimizationResult] = useState<Record<string, any> | null>(null);
+  const [createdVariant, setCreatedVariant] = useState<Record<string, any> | null>(null);
+  const [validatingVariantId, setValidatingVariantId] = useState<string | null>(null);
 
   const strategy = strategies.find((item) => item.id === id);
   const strategyBacktests = backtests.filter((item) => item.strategy_id === id);
@@ -56,6 +59,34 @@ export default function StrategyDetailPage() {
   const qualityGate = useMemo(() => evaluateQualityGates(latestBacktest, wfRows, strategyRiskRule), [latestBacktest, strategyRiskRule, wfRows]);
 
   if (!strategy) return <div>Strategie nicht gefunden.</div>;
+
+  const runValidationForStrategy = async (strategyId: string) => {
+    setValidatingVariantId(strategyId);
+    try {
+      await backtestMutation.mutateAsync({
+        strategyId,
+        startDate,
+        endDate,
+        initialCapital,
+        feeRate,
+        slippageRate,
+      });
+      await walkforwardMutation.mutateAsync({
+        strategyId,
+        startDate,
+        endDate,
+        initialCapital,
+        feeRate,
+        slippageRate,
+        windows,
+      });
+      toast.success("Variante wurde mit Backtest und Walk-Forward validiert.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Varianten-Validierung fehlgeschlagen.");
+    } finally {
+      setValidatingVariantId(null);
+    }
+  };
 
   const handleAnalyze = async () => {
     try {
@@ -77,11 +108,15 @@ export default function StrategyDetailPage() {
     }
   };
 
-  const handleCreateVariant = async () => {
+  const handleCreateVariant = async (validateImmediately = false) => {
     try {
       const result = await createVariantMutation.mutateAsync(strategy.id);
       setOptimizationResult(result);
+      setCreatedVariant(result.variant ?? null);
       toast.success(`Variante angelegt: ${result.variant?.name ?? "neue Variante"}`);
+      if (validateImmediately && result.variant?.id) {
+        await runValidationForStrategy(String(result.variant.id));
+      }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Variantenerzeugung fehlgeschlagen.");
     }
@@ -108,8 +143,11 @@ export default function StrategyDetailPage() {
               <Button variant="outline" onClick={() => void handleOptimize()} disabled={optimizeMutation.isPending}>
                 {optimizeMutation.isPending ? "Optimiere..." : "Optimierung ableiten"}
               </Button>
-              <Button onClick={() => void handleCreateVariant()} disabled={createVariantMutation.isPending}>
+              <Button onClick={() => void handleCreateVariant(false)} disabled={createVariantMutation.isPending}>
                 {createVariantMutation.isPending ? "Erzeuge Variante..." : "Variante erzeugen"}
+              </Button>
+              <Button variant="secondary" onClick={() => void handleCreateVariant(true)} disabled={createVariantMutation.isPending || backtestMutation.isPending || walkforwardMutation.isPending}>
+                {createVariantMutation.isPending || validatingVariantId ? "Erzeuge und validiere..." : "Variante + Validierung"}
               </Button>
             </div>
           </div>
@@ -118,6 +156,31 @@ export default function StrategyDetailPage() {
           <p className="text-sm text-slate-600">{strategy.description ?? "Keine Beschreibung vorhanden."}</p>
         </CardContent>
       </Card>
+
+      {createdVariant && (
+        <Card className="border-primary/30">
+          <CardHeader>
+            <CardTitle>Zuletzt erzeugte Variante</CardTitle>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div className="space-y-2 text-sm">
+              <p className="font-medium">{createdVariant.name}</p>
+              <p className="text-slate-500">{createdVariant.symbol} | {createdVariant.timeframe} | Status {createdVariant.status}</p>
+              <div className="flex flex-wrap gap-2">
+                {(createdVariant.tags ?? []).slice(0, 6).map((tag: string) => (
+                  <Badge key={tag} variant="outline">{tag}</Badge>
+                ))}
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-3">
+              <Button variant="outline" onClick={() => navigate(`/strategies/${createdVariant.id}`)}>Zur Variante</Button>
+              <Button onClick={() => void runValidationForStrategy(String(createdVariant.id))} disabled={validatingVariantId === createdVariant.id || backtestMutation.isPending || walkforwardMutation.isPending}>
+                {validatingVariantId === createdVariant.id ? "Validiere..." : "Variante jetzt validieren"}
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       <div className="grid gap-6 xl:grid-cols-3">
         <Card className="xl:col-span-1">
