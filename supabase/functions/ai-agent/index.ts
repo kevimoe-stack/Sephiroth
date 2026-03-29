@@ -41,6 +41,18 @@ function dedupe<T>(values: T[]) {
   return Array.from(new Set(values));
 }
 
+function sanitizeParentTags(tags: string[]) {
+  return tags.filter((tag) => ![
+    "candidate-ready",
+    "needs-improvement",
+    "validation-pending",
+    "preferred-for-tournament",
+    "pack-winner",
+    "retired-variant",
+    "optimizer-paused",
+  ].includes(tag));
+}
+
 function computeOperationalFeedback(
   paperPortfolio: Record<string, unknown> | null,
   livePortfolio: Record<string, unknown> | null,
@@ -239,7 +251,7 @@ function buildVariantPlans(strategy: StrategyRow, optimization: OptimizationPlan
 function buildVariantPayload(strategy: StrategyRow, optimization: OptimizationPlan, gateReasons: string[], operational: OperationalFeedback, index = 0) {
   const variantStamp = new Date().toISOString().slice(0, 16).replace(/[T:]/g, "-");
   const currentParameters = typeof strategy.parameters === "object" && strategy.parameters ? strategy.parameters : {};
-  const tags = Array.isArray(strategy.tags) ? strategy.tags : [];
+  const tags = Array.isArray(strategy.tags) ? sanitizeParentTags(strategy.tags) : [];
   const mergedTags = dedupe([
     ...tags,
     "agent-variant",

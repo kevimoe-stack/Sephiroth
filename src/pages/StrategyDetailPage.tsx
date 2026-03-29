@@ -169,6 +169,7 @@ export default function StrategyDetailPage() {
                 <Badge variant="secondary">{strategy.status}</Badge>
                 {strategy.is_champion && <Badge variant="success">Champion</Badge>}
                 <Badge variant={qualityGate.passed ? "success" : "warning"}>{qualityGate.passed ? "Research-ready" : "Gate blockiert"}</Badge>
+                {(strategy.tags ?? []).includes("optimizer-paused") && <Badge variant="warning">Optimizer pausiert</Badge>}
               </div>
               <p className="text-sm text-slate-500">{strategy.symbol} | {strategy.timeframe} | {strategy.asset_class}</p>
             </div>
@@ -196,6 +197,11 @@ export default function StrategyDetailPage() {
         </CardHeader>
         <CardContent>
           <p className="text-sm text-slate-600">{strategy.description ?? "Keine Beschreibung vorhanden."}</p>
+          {(strategy.tags ?? []).includes("optimizer-paused") && (
+            <p className="mt-3 text-sm text-amber-600">
+              Der automatische Optimizer ist fuer diese Elternstrategie aktuell pausiert, weil mehrere Varianten zuletzt wiederholt gescheitert sind. Manuelle Experimente sind weiter moeglich.
+            </p>
+          )}
         </CardContent>
       </Card>
 

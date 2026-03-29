@@ -160,6 +160,7 @@ Deno.serve(async (req) => {
       .filter(({ strategy, latestBacktest, qualityGate }) => {
         if (!latestBacktest) return false;
         if (qualityGate.passed) return false;
+        if (Array.isArray(strategy.tags) && strategy.tags.includes("optimizer-paused")) return false;
         if (variants.some((variant) => getParentStrategyId(variant) === strategy.id && (hasQueueTag(variant, "candidate-ready") || hasQueueTag(variant, "validation-pending")))) {
           return false;
         }

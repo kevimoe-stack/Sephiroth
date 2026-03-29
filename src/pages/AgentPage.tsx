@@ -54,11 +54,15 @@ export default function AgentPage() {
         const riskRule = riskRules.find((rule) => rule.strategy_id === strategy.id) ?? riskRules.find((rule) => rule.is_global) ?? null;
         const health = computeHealth(strategy, backtests, wf, paperPortfolios, livePortfolios, liveOrders);
         const gate = evaluateQualityGates(latestBacktest, strategyWalkforward, riskRule);
-        const queueStatus = (strategy.tags ?? []).includes("candidate-ready")
-          ? "candidate-ready"
-          : (strategy.tags ?? []).includes("validation-pending")
-            ? "validation-pending"
-            : "needs-improvement";
+        const queueStatus = (strategy.tags ?? []).includes("retired-variant")
+          ? "retired"
+          : !latestBacktest
+            ? "awaiting-validation"
+            : (strategy.tags ?? []).includes("candidate-ready")
+              ? "candidate-ready"
+              : (strategy.tags ?? []).includes("validation-pending")
+                ? "validation-pending"
+                : "needs-improvement";
         return {
           strategy,
           gate,
@@ -85,8 +89,8 @@ export default function AgentPage() {
         preferredForTournament: bestByParent.get(row.parentStrategyId) === row.strategy.id,
       }))
       .sort((left, right) => {
-        const leftScore = left.preferredForTournament ? 3 : left.queueStatus === "candidate-ready" ? 2 : left.queueStatus === "validation-pending" ? 1 : 0;
-        const rightScore = right.preferredForTournament ? 3 : right.queueStatus === "candidate-ready" ? 2 : right.queueStatus === "validation-pending" ? 1 : 0;
+        const leftScore = left.preferredForTournament ? 4 : left.queueStatus === "candidate-ready" ? 3 : left.queueStatus === "validation-pending" ? 2 : left.queueStatus === "awaiting-validation" ? 1 : 0;
+        const rightScore = right.preferredForTournament ? 4 : right.queueStatus === "candidate-ready" ? 3 : right.queueStatus === "validation-pending" ? 2 : right.queueStatus === "awaiting-validation" ? 1 : 0;
         return rightScore - leftScore;
       });
   }, [strategies, backtests, wf, riskRules, paperPortfolios, livePortfolios, liveOrders]);
@@ -151,7 +155,7 @@ export default function AgentPage() {
                     <p>{strategy.symbol} | {strategy.timeframe}</p>
                   </div>
                   <div className="flex flex-col items-end gap-1">
-                    <span className={queueStatus === "candidate-ready" ? "text-emerald-600" : queueStatus === "validation-pending" ? "text-amber-600" : "text-red-500"}>
+                    <span className={queueStatus === "candidate-ready" ? "text-emerald-600" : queueStatus === "validation-pending" || queueStatus === "awaiting-validation" ? "text-amber-600" : queueStatus === "retired" ? "text-slate-500" : "text-red-500"}>
                       {queueStatus}
                     </span>
                     {preferredForTournament && <span className="text-emerald-600">preferred-for-tournament</span>}
@@ -165,7 +169,11 @@ export default function AgentPage() {
                     {health.operationalNotes.map((note) => <p key={note}>{note}</p>)}
                   </div>
                 )}
-                {gate.reasons.length > 0 ? (
+                {queueStatus === "retired" ? (
+                  <div className="mt-2 space-y-1">
+                    <p>Diese Variante wurde nach wiederholtem Scheitern aus der automatischen Optimizer-Schleife genommen.</p>
+                  </div>
+                ) : gate.reasons.length > 0 ? (
                   <div className="mt-2 space-y-1">
                     {gate.reasons.map((reason) => <p key={reason} className="text-red-500">{reason}</p>)}
                   </div>

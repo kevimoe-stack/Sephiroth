@@ -4,7 +4,7 @@ import { evaluateQualityGates } from "../_shared/quality-gates.ts";
 import { runWalkForwardEngine } from "../_shared/trading-engine.ts";
 
 function removeQueueTags(tags: string[]) {
-  return tags.filter((tag) => !["candidate-ready", "needs-improvement", "validation-pending", "preferred-for-tournament", "pack-winner"].includes(tag));
+  return tags.filter((tag) => !["candidate-ready", "needs-improvement", "validation-pending", "preferred-for-tournament", "pack-winner", "retired-variant"].includes(tag));
 }
 
 function getParentStrategyId(strategy: Record<string, unknown>) {
@@ -24,6 +24,12 @@ function compareCandidates(left: Record<string, unknown>, right: Record<string, 
   const leftTrades = Number(left.total_trades ?? 0);
   const rightTrades = Number(right.total_trades ?? 0);
   return rightTrades - leftTrades;
+}
+
+function isRecent(createdAt: string | null | undefined, windowHours: number) {
+  const parsed = Date.parse(String(createdAt ?? ""));
+  if (Number.isNaN(parsed)) return false;
+  return Date.now() - parsed < windowHours * 60 * 60 * 1000;
 }
 
 Deno.serve(async (req) => {
@@ -123,6 +129,10 @@ Deno.serve(async (req) => {
       if (siblingError) throw siblingError;
 
       const variantsForParent = (siblingStrategies ?? []).filter((item) => getParentStrategyId(item) === parentStrategyId);
+      const recentFailedVariants = variantsForParent.filter((item) => {
+        const tags = Array.isArray(item.tags) ? item.tags : [];
+        return tags.includes("needs-improvement") && isRecent(String(item.updated_at ?? item.created_at ?? ""), 24);
+      });
       const readyVariants = variantsForParent.filter((item) => Array.isArray(item.tags) && item.tags.includes("candidate-ready"));
 
       if (readyVariants.length > 0) {
@@ -152,6 +162,19 @@ Deno.serve(async (req) => {
           ]));
           const { error: siblingUpdateError } = await supabase.from("strategies").update({ tags: variantNextTags }).eq("id", variant.id);
           if (siblingUpdateError) throw siblingUpdateError;
+        }
+      }
+
+      if (!qualityGate.passed && recentFailedVariants.length >= 3) {
+        nextTags = Array.from(new Set([...removeQueueTags(existingTags), "needs-improvement", "retired-variant"]));
+        const { data: parentStrategy } = await supabase.from("strategies").select("*").eq("id", parentStrategyId).single();
+        const parentTags = Array.isArray(parentStrategy?.tags) ? parentStrategy.tags.filter((tag) => typeof tag === "string") : [];
+        if (!parentTags.includes("optimizer-paused")) {
+          const { error: parentUpdateError } = await supabase
+            .from("strategies")
+            .update({ tags: Array.from(new Set([...parentTags, "optimizer-paused"])) })
+            .eq("id", parentStrategyId);
+          if (parentUpdateError) throw parentUpdateError;
         }
       }
     }
