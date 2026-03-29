@@ -4,7 +4,7 @@ import { KpiCard } from "@/components/dashboard/KpiCard";
 import { StrategyRankingTable } from "@/components/dashboard/StrategyRankingTable";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { useBacktests, useRiskRules, useStrategies, useWalkforwardResults } from "@/hooks/use-trading-data";
+import { useBacktests, useLiveOrders, useLivePortfolios, usePaperPortfolios, useRiskRules, useStrategies, useWalkforwardResults } from "@/hooks/use-trading-data";
 import { buildTournamentBoard } from "@/lib/tournament";
 import { formatNumber, formatPercent } from "@/lib/utils";
 
@@ -12,8 +12,11 @@ export default function DashboardPage() {
   const { data: strategies = [] } = useStrategies();
   const { data: backtests = [] } = useBacktests();
   const { data: walkforward = [] } = useWalkforwardResults();
+  const { data: paperPortfolios = [] } = usePaperPortfolios();
+  const { data: livePortfolios = [] } = useLivePortfolios();
+  const { data: liveOrders = [] } = useLiveOrders();
   const { data: riskRules = [] } = useRiskRules();
-  const tournament = buildTournamentBoard(strategies, backtests, walkforward, riskRules);
+  const tournament = buildTournamentBoard(strategies, backtests, walkforward, riskRules, paperPortfolios, livePortfolios, liveOrders);
   const champion = tournament.champion?.strategy ?? strategies.find((strategy) => strategy.is_champion);
   const championBacktest = tournament.champion?.backtest ?? backtests.find((backtest) => backtest.strategy_id === champion?.id);
   const bestSharpe = Math.max(...backtests.map((backtest) => backtest.sharpe_ratio ?? 0), 0);
@@ -79,7 +82,15 @@ export default function DashboardPage() {
         </Card>
       </section>
 
-      <StrategyRankingTable strategies={strategies} backtests={backtests} walkforward={walkforward} riskRules={riskRules} />
+      <StrategyRankingTable
+        strategies={strategies}
+        backtests={backtests}
+        walkforward={walkforward}
+        riskRules={riskRules}
+        paperPortfolios={paperPortfolios}
+        livePortfolios={livePortfolios}
+        liveOrders={liveOrders}
+      />
     </div>
   );
 }

@@ -3,7 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { useAgentAnalyze, useAgentBulkAnalyze, useAgentOptimize, useBacktests, useRiskRules, useStrategies, useWalkforwardResults } from "@/hooks/use-trading-data";
+import { useAgentAnalyze, useAgentBulkAnalyze, useAgentOptimize, useBacktests, useLiveOrders, useLivePortfolios, usePaperPortfolios, useRiskRules, useStrategies, useWalkforwardResults } from "@/hooks/use-trading-data";
 import { computeHealth } from "@/lib/analytics";
 import { evaluateQualityGates } from "@/lib/quality-gates";
 import { formatNumber } from "@/lib/utils";
@@ -19,6 +19,9 @@ export default function AgentPage() {
   const { data: strategies = [] } = useStrategies();
   const { data: backtests = [] } = useBacktests();
   const { data: wf = [] } = useWalkforwardResults();
+  const { data: paperPortfolios = [] } = usePaperPortfolios();
+  const { data: livePortfolios = [] } = useLivePortfolios();
+  const { data: liveOrders = [] } = useLiveOrders();
   const { data: riskRules = [] } = useRiskRules();
   const analyzeMutation = useAgentAnalyze();
   const optimizeMutation = useAgentOptimize();
@@ -28,9 +31,9 @@ export default function AgentPage() {
   const healthRows = useMemo(
     () =>
       strategies
-        .map((strategy) => ({ strategy, ...computeHealth(strategy, backtests, wf) }))
+        .map((strategy) => ({ strategy, ...computeHealth(strategy, backtests, wf, paperPortfolios, livePortfolios, liveOrders) }))
         .sort((left, right) => right.healthScore - left.healthScore),
-    [strategies, backtests, wf],
+    [strategies, backtests, wf, paperPortfolios, livePortfolios, liveOrders],
   );
 
   const selectedStrategy = strategies.find((strategy) => strategy.id === selectedStrategyId) ?? healthRows[0]?.strategy ?? null;
@@ -49,6 +52,7 @@ export default function AgentPage() {
         const latestBacktest = backtests.find((backtest) => backtest.strategy_id === strategy.id) ?? null;
         const strategyWalkforward = wf.filter((row) => row.strategy_id === strategy.id);
         const riskRule = riskRules.find((rule) => rule.strategy_id === strategy.id) ?? riskRules.find((rule) => rule.is_global) ?? null;
+        const health = computeHealth(strategy, backtests, wf, paperPortfolios, livePortfolios, liveOrders);
         const gate = evaluateQualityGates(latestBacktest, strategyWalkforward, riskRule);
         const queueStatus = (strategy.tags ?? []).includes("candidate-ready")
           ? "candidate-ready"
@@ -58,6 +62,7 @@ export default function AgentPage() {
         return {
           strategy,
           gate,
+          health,
           queueStatus,
           latestBacktest,
           parentStrategyId: getParentStrategyId(strategy),
@@ -84,7 +89,7 @@ export default function AgentPage() {
         const rightScore = right.preferredForTournament ? 3 : right.queueStatus === "candidate-ready" ? 2 : right.queueStatus === "validation-pending" ? 1 : 0;
         return rightScore - leftScore;
       });
-  }, [strategies, backtests, wf, riskRules]);
+  }, [strategies, backtests, wf, riskRules, paperPortfolios, livePortfolios, liveOrders]);
 
   return (
     <Tabs defaultValue="overview" className="space-y-4">
@@ -96,12 +101,14 @@ export default function AgentPage() {
         <TabsTrigger value="optimize">Optimize</TabsTrigger>
       </TabsList>
       <TabsContent value="overview" className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-        {healthRows.map(({ strategy, healthScore, readinessScore, passRate }) => (
+        {healthRows.map(({ strategy, healthScore, readinessScore, passRate, operationalScore, operationalReadiness }) => (
           <Card key={strategy.id}>
             <CardHeader><CardTitle>{strategy.name}</CardTitle></CardHeader>
             <CardContent className="space-y-2 text-sm text-slate-500">
               <p>Health Score: <span className="font-semibold text-foreground">{formatNumber(healthScore)}</span></p>
               <p>Readiness: <span className="font-semibold text-foreground">{formatNumber(readinessScore)}</span></p>
+              <p>Operational Score: <span className="font-semibold text-foreground">{operationalScore === null ? "-" : formatNumber(operationalScore)}</span></p>
+              <p>Operational Readiness: <span className="font-semibold text-foreground">{operationalReadiness === null ? "-" : formatNumber(operationalReadiness)}</span></p>
               <p>WF Pass Rate: <span className="font-semibold text-foreground">{formatNumber(passRate * 100)}</span>%</p>
             </CardContent>
           </Card>
@@ -136,7 +143,7 @@ export default function AgentPage() {
           <CardHeader><CardTitle>Candidate Queue</CardTitle></CardHeader>
           <CardContent className="space-y-4 text-sm text-slate-500">
             {candidateRows.length === 0 && <p>Noch keine Agent-Varianten in der Queue.</p>}
-            {candidateRows.map(({ strategy, gate, queueStatus, latestBacktest, preferredForTournament }) => (
+            {candidateRows.map(({ strategy, gate, health, queueStatus, latestBacktest, preferredForTournament }) => (
               <div key={strategy.id} className="rounded-xl bg-muted p-4">
                 <div className="flex items-center justify-between gap-3">
                   <div>
@@ -150,7 +157,14 @@ export default function AgentPage() {
                     {preferredForTournament && <span className="text-emerald-600">preferred-for-tournament</span>}
                   </div>
                 </div>
-                <p className="mt-2">Sharpe {formatNumber(latestBacktest?.sharpe_ratio)} | Trades {formatNumber(latestBacktest?.total_trades ?? 0, 0)}</p>
+                <p className="mt-2">
+                  Sharpe {formatNumber(latestBacktest?.sharpe_ratio)} | Trades {formatNumber(latestBacktest?.total_trades ?? 0, 0)} | Operational {health.operationalScore === null ? "-" : formatNumber(health.operationalScore)}
+                </p>
+                {health.operationalNotes.length > 0 && (
+                  <div className="mt-2 space-y-1">
+                    {health.operationalNotes.map((note) => <p key={note}>{note}</p>)}
+                  </div>
+                )}
                 {gate.reasons.length > 0 ? (
                   <div className="mt-2 space-y-1">
                     {gate.reasons.map((reason) => <p key={reason} className="text-red-500">{reason}</p>)}

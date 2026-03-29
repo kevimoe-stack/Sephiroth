@@ -1,4 +1,4 @@
-﻿import type { Backtest, RiskRule, Strategy, WalkforwardResult } from "@/integrations/supabase/types";
+﻿import type { Backtest, LiveOrder, LivePortfolio, PaperPortfolio, RiskRule, Strategy, WalkforwardResult } from "@/integrations/supabase/types";
 import { computeHealth, getLatestBacktest, getWalkforwardRows } from "@/lib/analytics";
 import { evaluateQualityGates } from "@/lib/quality-gates";
 
@@ -54,10 +54,20 @@ export function evaluateTournamentRow(
   backtests: Backtest[],
   walkforward: WalkforwardResult[],
   riskRule?: RiskRule | null,
+  paperPortfolios: PaperPortfolio[] = [],
+  livePortfolios: LivePortfolio[] = [],
+  liveOrders: LiveOrder[] = [],
 ): TournamentRow {
   const backtest = getLatestBacktest(backtests, strategy.id);
   const walkforwardRows = getWalkforwardRows(walkforward, strategy.id);
-  const { healthScore, readinessScore, passRate } = computeHealth(strategy, backtests, walkforward);
+  const { healthScore, readinessScore, passRate, operationalScore, blockedOrdersCount } = computeHealth(
+    strategy,
+    backtests,
+    walkforward,
+    paperPortfolios,
+    livePortfolios,
+    liveOrders,
+  );
   const maxDrawdown = Math.abs(backtest?.max_drawdown ?? 100);
   const returnValue = backtest?.total_return ?? 0;
   const profitFactor = backtest?.profit_factor ?? 0;
@@ -82,9 +92,10 @@ export function evaluateTournamentRow(
           riskManagementScore * 0.25 +
           healthScore * 0.2 +
           readinessScore * 0.1 +
+          (operationalScore ?? 50) * 0.1 +
           Math.min(returnValue, 100) * 0.1,
       )
-    : clampScore(Math.min(capitalPreservationScore, riskManagementScore) * 0.5);
+    : clampScore(Math.min(capitalPreservationScore, riskManagementScore) * 0.5 - blockedOrdersCount * 2);
 
   return {
     strategy,
@@ -106,11 +117,14 @@ export function buildTournamentBoard(
   backtests: Backtest[],
   walkforward: WalkforwardResult[],
   riskRules: RiskRule[],
+  paperPortfolios: PaperPortfolio[] = [],
+  livePortfolios: LivePortfolio[] = [],
+  liveOrders: LiveOrder[] = [],
 ) {
   const globalRiskRule = riskRules.find((rule) => rule.is_global) ?? null;
   const eligibleRows = strategies
     .filter(isEligibleForTournament)
-    .map((strategy) => evaluateTournamentRow(strategy, backtests, walkforward, globalRiskRule))
+    .map((strategy) => evaluateTournamentRow(strategy, backtests, walkforward, globalRiskRule, paperPortfolios, livePortfolios, liveOrders))
     .sort((left, right) => right.fitnessScore - left.fitnessScore);
   const rows = selectBestRows(eligibleRows);
 

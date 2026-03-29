@@ -9,6 +9,7 @@ import {
   useExecuteTradeAction,
   useLifecycleEvents,
   useLifecycleRuns,
+  usePaperPortfolios,
   useLiveOrders,
   useLivePortfolios,
   useMetaAllocationEntries,
@@ -31,6 +32,7 @@ export default function ExecutionPage() {
   const { data: backtests = [] } = useBacktests();
   const { data: wf = [] } = useWalkforwardResults();
   const { data: riskRules = [] } = useRiskRules();
+  const { data: paperPortfolios = [] } = usePaperPortfolios();
   const { data: live = [] } = useLivePortfolios();
   const { data: liveOrders = [] } = useLiveOrders();
   const { data: tournamentRuns = [] } = useTournamentRuns();
@@ -46,7 +48,10 @@ export default function ExecutionPage() {
   const executeTrade = useExecuteTradeAction();
   const [strategyId, setStrategyId] = useState("");
 
-  const readinessRows = strategies.map((strategy) => ({ strategy, ...computeHealth(strategy, backtests, wf) }));
+  const readinessRows = strategies.map((strategy) => ({
+    strategy,
+    ...computeHealth(strategy, backtests, wf, paperPortfolios, live, liveOrders),
+  }));
   const activeLive = live.filter((item) => item.is_active);
   const latestLifecycle = lifecycleRuns[0] ?? null;
   const latestEvents = latestLifecycle ? lifecycleEvents.filter((event) => event.lifecycle_run_id === latestLifecycle.id) : [];
@@ -98,13 +103,16 @@ export default function ExecutionPage() {
         <TabsTrigger value="monitoring">Monitoring</TabsTrigger>
       </TabsList>
       <TabsContent value="pipeline" className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-        {readinessRows.map(({ strategy, backtest, wfRows, readinessScore }) => (
+        {readinessRows.map(({ strategy, backtest, wfRows, readinessScore, operationalScore, operationalReadiness, blockedOrdersCount }) => (
           <Card key={strategy.id}>
             <CardHeader><CardTitle>{strategy.name}</CardTitle></CardHeader>
             <CardContent className="space-y-2 text-sm text-slate-500">
               <p>Readiness Score: <span className="font-semibold text-foreground">{formatNumber(readinessScore)}</span></p>
+              <p>Operational Score: <span className="font-semibold text-foreground">{operationalScore === null ? "-" : formatNumber(operationalScore)}</span></p>
+              <p>Operational Readiness: <span className="font-semibold text-foreground">{operationalReadiness === null ? "-" : formatNumber(operationalReadiness)}</span></p>
               <p>Backtest: {backtest ? "vorhanden" : "offen"}</p>
               <p>Walk-Forward: {wfRows.length > 0 ? "vorhanden" : "offen"}</p>
+              <p>Geblockte Checks: {blockedOrdersCount}</p>
               <p>Live-Freigabe: {readinessScore >= 70 ? "beobachten fuer deployment" : "noch nicht freigeben"}</p>
             </CardContent>
           </Card>

@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { StrategyRankingTable } from "@/components/dashboard/StrategyRankingTable";
-import { useBacktests, useLifecycleEvents, useLifecycleRuns, useMonitorAlerts, useMonitorRuns, useRiskRules, useRunLifecycle, useRunMonitor, useRunTournament, useStrategies, useTournamentEntries, useTournamentRuns, useWalkforwardResults } from "@/hooks/use-trading-data";
+import { useBacktests, useLifecycleEvents, useLifecycleRuns, useLiveOrders, useLivePortfolios, useMonitorAlerts, useMonitorRuns, usePaperPortfolios, useRiskRules, useRunLifecycle, useRunMonitor, useRunTournament, useStrategies, useTournamentEntries, useTournamentRuns, useWalkforwardResults } from "@/hooks/use-trading-data";
 import { buildTournamentBoard } from "@/lib/tournament";
 import { formatNumber } from "@/lib/utils";
 
@@ -11,6 +11,9 @@ export default function ChampionPage() {
   const { data: strategies = [] } = useStrategies();
   const { data: backtests = [] } = useBacktests();
   const { data: walkforward = [] } = useWalkforwardResults();
+  const { data: paperPortfolios = [] } = usePaperPortfolios();
+  const { data: livePortfolios = [] } = useLivePortfolios();
+  const { data: liveOrders = [] } = useLiveOrders();
   const { data: riskRules = [] } = useRiskRules();
   const { data: tournamentRuns = [] } = useTournamentRuns();
   const { data: tournamentEntries = [] } = useTournamentEntries();
@@ -21,7 +24,7 @@ export default function ChampionPage() {
   const runTournament = useRunTournament();
   const runLifecycle = useRunLifecycle();
   const runMonitor = useRunMonitor();
-  const tournament = buildTournamentBoard(strategies, backtests, walkforward, riskRules);
+  const tournament = buildTournamentBoard(strategies, backtests, walkforward, riskRules, paperPortfolios, livePortfolios, liveOrders);
   const champion = tournament.champion;
   const challenger = tournament.challengers[0] ?? tournament.rows[1] ?? null;
   const championBacktest = champion?.backtest;
@@ -186,7 +189,15 @@ export default function ChampionPage() {
           </CardContent>
         </Card>
       )}
-      <StrategyRankingTable strategies={strategies} backtests={backtests} walkforward={walkforward} riskRules={riskRules} />
+      <StrategyRankingTable
+        strategies={strategies}
+        backtests={backtests}
+        walkforward={walkforward}
+        riskRules={riskRules}
+        paperPortfolios={paperPortfolios}
+        livePortfolios={livePortfolios}
+        liveOrders={liveOrders}
+      />
     </div>
   );
 }

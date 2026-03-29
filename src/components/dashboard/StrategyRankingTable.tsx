@@ -5,23 +5,29 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { formatNumber, formatPercent } from "@/lib/utils";
 import { buildTournamentBoard } from "@/lib/tournament";
-import type { Backtest, RiskRule, Strategy, WalkforwardResult } from "@/integrations/supabase/types";
+import type { Backtest, LiveOrder, LivePortfolio, PaperPortfolio, RiskRule, Strategy, WalkforwardResult } from "@/integrations/supabase/types";
 
 export function StrategyRankingTable({
   strategies,
   backtests,
   walkforward = [],
   riskRules = [],
+  paperPortfolios = [],
+  livePortfolios = [],
+  liveOrders = [],
 }: {
   strategies: Strategy[];
   backtests: Backtest[];
   walkforward?: WalkforwardResult[];
   riskRules?: RiskRule[];
+  paperPortfolios?: PaperPortfolio[];
+  livePortfolios?: LivePortfolio[];
+  liveOrders?: LiveOrder[];
 }) {
   const navigate = useNavigate();
   const rows = useMemo(() => {
-    return buildTournamentBoard(strategies, backtests, walkforward, riskRules).rows;
-  }, [backtests, riskRules, strategies, walkforward]);
+    return buildTournamentBoard(strategies, backtests, walkforward, riskRules, paperPortfolios, livePortfolios, liveOrders).rows;
+  }, [backtests, riskRules, strategies, walkforward, paperPortfolios, livePortfolios, liveOrders]);
 
   return (
     <Card>
@@ -37,12 +43,13 @@ export function StrategyRankingTable({
                 <TableHead>Fitness</TableHead>
                 <TableHead>Kernel</TableHead>
                 <TableHead>Sharpe</TableHead>
+                <TableHead>Operational</TableHead>
                 <TableHead>Return</TableHead>
                 <TableHead>Win Rate</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {rows.map(({ strategy, backtest, fitnessScore, passedKernel, kernelReasons }) => (
+              {rows.map(({ strategy, backtest, fitnessScore, passedKernel, kernelReasons, healthScore, readinessScore }) => (
                 <TableRow key={strategy.id} className="cursor-pointer" onClick={() => navigate(`/strategies/${strategy.id}`)}>
                   <TableCell>
                     <div className="flex items-center gap-3">
@@ -64,6 +71,7 @@ export function StrategyRankingTable({
                     )}
                   </TableCell>
                   <TableCell>{formatNumber(backtest?.sharpe_ratio)}</TableCell>
+                  <TableCell>{formatNumber((healthScore + readinessScore) / 2)}</TableCell>
                   <TableCell>{formatPercent(backtest?.total_return)}</TableCell>
                   <TableCell>{formatPercent(backtest?.win_rate)}</TableCell>
                 </TableRow>
