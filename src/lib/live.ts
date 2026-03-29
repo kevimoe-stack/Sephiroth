@@ -1,4 +1,4 @@
-import { supabase } from "@/integrations/supabase/client";
+﻿import { supabase } from "@/integrations/supabase/client";
 
 export interface ExecuteTradeRequest {
   action: "start" | "check" | "stop";
@@ -8,7 +8,7 @@ export interface ExecuteTradeRequest {
 
 export async function invokeExecuteTrade(request: ExecuteTradeRequest) {
   if (!supabase) {
-    throw new Error("Supabase ist nicht konfiguriert. Für Execution wird eine Edge Function benötigt.");
+    throw new Error("Supabase ist nicht konfiguriert. Fuer Execution wird eine Edge Function benoetigt.");
   }
   const { data, error } = await supabase.functions.invoke("execute-trade", {
     body: request,

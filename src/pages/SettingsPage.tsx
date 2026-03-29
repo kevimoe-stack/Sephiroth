@@ -1,4 +1,5 @@
 ﻿import { hasSupabaseEnv } from "@/integrations/supabase/client";
+import { buildTestnetChecklist } from "@/lib/deployment";
 import { buildReadinessReport } from "@/lib/readiness";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -11,6 +12,7 @@ import {
   useMetaAllocationRuns,
   useMonitorAlerts,
   useMonitorRuns,
+  usePaperPortfolios,
   useRebalanceActions,
   useRebalanceRuns,
   useRegimeRuns,
@@ -31,6 +33,7 @@ export default function SettingsPage() {
   const { data: allocations = [] } = useAllocations();
   const { data: monitorRuns = [] } = useMonitorRuns();
   const { data: monitorAlerts = [] } = useMonitorAlerts();
+  const { data: paperPortfolios = [] } = usePaperPortfolios();
   const { data: liveOrders = [] } = useLiveOrders();
   const { data: jobRuns = [] } = useJobRuns();
   const { data: jobSteps = [] } = useJobSteps();
@@ -68,6 +71,16 @@ export default function SettingsPage() {
     allocations,
     criticalAlerts,
     activeConfig,
+    liveOrders,
+  });
+  const testnetChecklist = buildTestnetChecklist({
+    readiness,
+    strategies,
+    tournamentRuns,
+    paperPortfolios,
+    schedulerRuns,
+    metaRuns: metaAllocationRuns,
+    criticalAlerts,
     liveOrders,
   });
   const readinessTone =
@@ -134,6 +147,29 @@ export default function SettingsPage() {
               ))}
             </div>
           </div>
+        </CardContent>
+      </Card>
+
+      <Card className="md:col-span-2 xl:col-span-3">
+        <CardHeader>
+          <CardTitle>Testnet Gate</CardTitle>
+        </CardHeader>
+        <CardContent className="grid gap-3 xl:grid-cols-2 text-sm text-slate-500">
+          {testnetChecklist.map((item) => (
+            <div key={item.key} className={`rounded-xl border p-4 ${
+              item.status === "ready"
+                ? "border-emerald-200 bg-emerald-50"
+                : item.status === "warning"
+                  ? "border-amber-200 bg-amber-50"
+                  : "border-slate-200 bg-slate-50"
+            }`}>
+              <div className="flex items-center justify-between gap-3">
+                <p className="font-medium text-foreground">{item.label}</p>
+                <span className="text-xs uppercase tracking-wide text-slate-500">{item.status}</span>
+              </div>
+              <p className="mt-2">{item.detail}</p>
+            </div>
+          ))}
         </CardContent>
       </Card>
 

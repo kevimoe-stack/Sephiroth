@@ -1,5 +1,6 @@
 ﻿import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
+  useLiveOrders,
   useMetaAllocationRuns,
   useMonitorAlerts,
   usePaperPortfolios,
@@ -8,13 +9,14 @@ import {
   useTournamentRuns,
 } from "@/hooks/use-trading-data";
 import { hasSupabaseEnv } from "@/integrations/supabase/client";
-import { buildDeploymentStages, buildRunbookActions } from "@/lib/deployment";
+import { buildDeploymentStages, buildRunbookActions, buildTestnetChecklist } from "@/lib/deployment";
 import { buildReadinessReport } from "@/lib/readiness";
 
 export default function GuidePage() {
   const { data: strategies = [] } = useStrategies();
   const { data: tournamentRuns = [] } = useTournamentRuns();
   const { data: paperPortfolios = [] } = usePaperPortfolios();
+  const { data: liveOrders = [] } = useLiveOrders();
   const { data: schedulerRuns = [] } = useSchedulerRuns();
   const { data: metaRuns = [] } = useMetaAllocationRuns();
   const { data: monitorAlerts = [] } = useMonitorAlerts();
@@ -43,10 +45,23 @@ export default function GuidePage() {
     schedulerRuns,
     metaRuns,
     criticalAlerts,
+    liveOrders,
   });
   const runbook = buildRunbookActions(readiness);
+  const testnetChecklist = buildTestnetChecklist({
+    readiness,
+    strategies,
+    tournamentRuns,
+    paperPortfolios,
+    schedulerRuns,
+    metaRuns,
+    criticalAlerts,
+    liveOrders,
+  });
   const tone = (status: "done" | "current" | "blocked") =>
     status === "done" ? "border-emerald-200 bg-emerald-50" : status === "current" ? "border-amber-200 bg-amber-50" : "border-slate-200 bg-slate-50";
+  const checklistTone = (status: "ready" | "warning" | "blocked") =>
+    status === "ready" ? "border-emerald-200 bg-emerald-50" : status === "warning" ? "border-amber-200 bg-amber-50" : "border-slate-200 bg-slate-50";
 
   return (
     <div className="space-y-6">
@@ -100,12 +115,15 @@ export default function GuidePage() {
         <Card>
           <CardHeader><CardTitle>Checkliste vor Testnet</CardTitle></CardHeader>
           <CardContent className="space-y-2 text-sm text-slate-500">
-            <p>{strategies.length > 0 ? "OK" : "Offen"} Strategien mit echter Research-Basis</p>
-            <p>{tournamentRuns.length > 0 ? "OK" : "Offen"} Champion/Challenger-Tournament</p>
-            <p>{paperPortfolios.length > 0 ? "OK" : "Offen"} Paper Trading Historie</p>
-            <p>{criticalAlerts.length === 0 ? "OK" : "Offen"} Keine kritischen Monitor-Alerts</p>
-            <p>{schedulerRuns.length > 0 ? "OK" : "Offen"} Scheduler-/Orchestrator-Zyklen</p>
-            <p>{metaRuns.length > 0 ? "OK" : "Offen"} Meta-Allokation verfuegbar</p>
+            {testnetChecklist.map((item) => (
+              <div key={item.key} className={`rounded-xl border p-4 ${checklistTone(item.status)}`}>
+                <div className="flex items-center justify-between gap-3">
+                  <p className="font-medium text-foreground">{item.label}</p>
+                  <span className="text-xs uppercase tracking-wide text-slate-500">{item.status}</span>
+                </div>
+                <p className="mt-2 text-sm text-slate-600">{item.detail}</p>
+              </div>
+            ))}
           </CardContent>
         </Card>
       </div>

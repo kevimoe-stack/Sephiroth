@@ -64,6 +64,17 @@ npm run check:vercel
 - persistierte Champion/Challenger- und Lifecycle-Entscheidung
 - Dry-Run und anschliessend Testnet-Execution erfolgreich validiert
 
+## Testnet Gate
+
+Vor Binance Testnet sollte Sephiroth mindestens folgendes sauber anzeigen:
+
+- Research-Basis und persistiertes Tournament vorhanden
+- Paper-Historie mit mehreren Trades statt nur leerer Dummy-Portfolios
+- Dry-Run-Execution ohne aktuelle Blocker
+- Scheduler-/Orchestrator-Loop und Meta-Allokation vorhanden
+- keine kritischen Alerts offen
+- Binance Testnet Keys nur serverseitig in Supabase Secrets
+
 ## Noch offen fuer echtes Production-Live
 
 - echter Cron/Scheduler ausserhalb der UI

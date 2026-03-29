@@ -24,6 +24,7 @@ import {
   useWalkforwardResults,
 } from "@/hooks/use-trading-data";
 import { computeHealth } from "@/lib/analytics";
+import { buildTestnetChecklist } from "@/lib/deployment";
 import { buildReadinessReport } from "@/lib/readiness";
 import { formatNumber, formatPercent } from "@/lib/utils";
 
@@ -82,6 +83,16 @@ export default function ExecutionPage() {
   const selectedMetaAllocation = latestMetaEntries.find((entry) => entry.strategy_id === selectedStrategyId);
   const selectedLifecycleAllocation = latestAllocations.find((entry) => entry.strategy_id === selectedStrategyId);
   const allowedAllocation = selectedMetaAllocation?.suggested_allocation ?? selectedLifecycleAllocation?.allocation_percent ?? 0;
+  const testnetChecklist = buildTestnetChecklist({
+    readiness: executionReadiness,
+    strategies,
+    tournamentRuns,
+    paperPortfolios,
+    schedulerRuns: [],
+    metaRuns: metaAllocationRuns,
+    criticalAlerts,
+    liveOrders,
+  });
   const liveBlockedReasons = [
     !hasSupabaseEnv ? "Supabase ist noch nicht angebunden." : null,
     executionReadiness.score < 70 ? `Platform Readiness ist mit ${executionReadiness.score}% noch zu niedrig.` : null,
@@ -228,6 +239,22 @@ export default function ExecutionPage() {
                   </div>
                 );
               }) : <p>Noch keine Allokation vorhanden.</p>}
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader><CardTitle>Testnet Gate</CardTitle></CardHeader>
+            <CardContent className="space-y-3 text-sm text-slate-500">
+              {testnetChecklist.map((item) => (
+                <div key={item.key} className="rounded-xl bg-muted p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="font-medium text-foreground">{item.label}</p>
+                    <span className={item.status === "ready" ? "text-emerald-600" : item.status === "warning" ? "text-amber-600" : "text-slate-500"}>
+                      {item.status}
+                    </span>
+                  </div>
+                  <p className="mt-1">{item.detail}</p>
+                </div>
+              ))}
             </CardContent>
           </Card>
         </div>
