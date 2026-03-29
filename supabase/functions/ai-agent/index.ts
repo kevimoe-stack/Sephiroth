@@ -22,45 +22,118 @@ type OptimizationPlan = {
   variantLabel?: string;
 };
 
-function scoreStrategy(backtest: Record<string, unknown> | null, walkforward: Array<Record<string, unknown>>) {
-  const sharpe = Number(backtest?.sharpe_ratio ?? 0);
-  const winRate = Number(backtest?.win_rate ?? 0);
-  const maxDrawdown = Math.abs(Number(backtest?.max_drawdown ?? 0));
-  const totalReturn = Number(backtest?.total_return ?? 0);
-  const passedRatio = walkforward.length === 0 ? 0 : walkforward.filter((row) => Boolean(row.passed)).length / walkforward.length;
-  const healthScore = Math.max(0, Math.min(100, Math.round(45 + sharpe * 14 + winRate * 0.18 + totalReturn * 0.1 - maxDrawdown * 0.7 + passedRatio * 18)));
-  const readinessScore = Math.max(0, Math.min(100, Math.round(25 + sharpe * 12 + passedRatio * 30 + (Number(backtest?.total_trades ?? 0) >= 20 ? 18 : 4) - maxDrawdown * 0.6)));
-  return { healthScore, readinessScore, passedRatio };
-}
+type OperationalFeedback = {
+  score: number | null;
+  readiness: number | null;
+  blockedOrders: number;
+  errorOrders: number;
+  executedOrders: number;
+  paperTrades: number;
+  paperPnl: number;
+  reasons: string[];
+};
 
-function buildStrengths(backtest: Record<string, unknown> | null, passedRatio: number) {
-  const strengths: string[] = [];
-  if (Number(backtest?.sharpe_ratio ?? 0) > 1.2) strengths.push("Risikobereinigte Performance ist ueberdurchschnittlich.");
-  if (Number(backtest?.profit_factor ?? 0) > 1.4) strengths.push("Das Gewinn-Verlust-Verhaeltnis ist robust genug fuer weitere Validierung.");
-  if (passedRatio >= 0.5) strengths.push("Walk-Forward besteht auf mehreren Fenstern und reduziert Overfitting-Risiko.");
-  return strengths;
-}
-
-function buildRisks(backtest: Record<string, unknown> | null, passedRatio: number) {
-  const risks: string[] = [];
-  if (Math.abs(Number(backtest?.max_drawdown ?? 0)) > 20) risks.push("Drawdown ist fuer kontrolliertes Deployment noch zu hoch.");
-  if (Number(backtest?.total_trades ?? 0) < 15) risks.push("Zu wenige Trades machen die Statistik fragiler.");
-  if (passedRatio < 0.4) risks.push("Out-of-sample Stabilitaet ist noch nicht ausreichend.");
-  return risks;
+function clampScore(value: number) {
+  return Math.max(0, Math.min(100, Math.round(value)));
 }
 
 function dedupe<T>(values: T[]) {
   return Array.from(new Set(values));
 }
 
-function buildOptimization(strategy: StrategyRow, gateReasons: string[]): OptimizationPlan {
+function computeOperationalFeedback(
+  paperPortfolio: Record<string, unknown> | null,
+  livePortfolio: Record<string, unknown> | null,
+  liveOrders: Array<Record<string, unknown>>,
+): OperationalFeedback {
+  const blockedOrders = liveOrders.filter((order) => String(order.status ?? "") === "blocked").length;
+  const errorOrders = liveOrders.filter((order) => Boolean(order.error_message)).length;
+  const executedOrders = liveOrders.filter((order) => ["simulated", "dry-run", "filled"].includes(String(order.status ?? ""))).length;
+  const paperTrades = Number(paperPortfolio?.total_trades ?? 0);
+  const paperPnl = Number(paperPortfolio?.total_pnl ?? 0);
+  const paperDrawdown = Math.abs(Number(paperPortfolio?.max_drawdown ?? 0));
+  const paperWinRate = paperTrades > 0 ? Number(paperPortfolio?.winning_trades ?? 0) / paperTrades : 0;
+  const blockedRatio = liveOrders.length > 0 ? blockedOrders / liveOrders.length : 0;
+  const hasOperationalData = Boolean(paperPortfolio) || Boolean(livePortfolio) || liveOrders.length > 0;
+  const score = hasOperationalData
+    ? clampScore(
+        50 +
+          Math.min(executedOrders, 6) * 5 +
+          Math.min(paperTrades, 30) * 0.6 +
+          paperWinRate * 20 +
+          Math.min(Math.max(paperPnl / 50, -20), 20) -
+          blockedRatio * 28 -
+          errorOrders * 8 -
+          paperDrawdown * 1.1,
+      )
+    : null;
+  const readiness = hasOperationalData
+    ? clampScore(
+        45 +
+          Math.min(executedOrders, 8) * 4 +
+          (Boolean(livePortfolio?.is_active) ? 10 : 0) +
+          Math.min(paperTrades, 30) * 0.5 -
+          blockedRatio * 30 -
+          errorOrders * 10 -
+          paperDrawdown,
+      )
+    : null;
+  const reasons: string[] = [];
+  if (blockedOrders > 0) reasons.push(`${blockedOrders} blockierte Execution-Checks`);
+  if (errorOrders > 0) reasons.push(`${errorOrders} Execution-Checks mit Fehlermeldung`);
+  if (paperTrades > 0) reasons.push(`Paper Trades ${paperTrades}`);
+  if (paperPnl < 0) reasons.push("Paper-PnL negativ");
+  if (paperDrawdown > 10) reasons.push("Paper Drawdown erhoeht");
+
+  return { score, readiness, blockedOrders, errorOrders, executedOrders, paperTrades, paperPnl, reasons };
+}
+
+function scoreStrategy(
+  backtest: Record<string, unknown> | null,
+  walkforward: Array<Record<string, unknown>>,
+  operational: OperationalFeedback,
+) {
+  const sharpe = Number(backtest?.sharpe_ratio ?? 0);
+  const winRate = Number(backtest?.win_rate ?? 0);
+  const maxDrawdown = Math.abs(Number(backtest?.max_drawdown ?? 0));
+  const totalReturn = Number(backtest?.total_return ?? 0);
+  const passedRatio = walkforward.length === 0 ? 0 : walkforward.filter((row) => Boolean(row.passed)).length / walkforward.length;
+  const baseHealthScore = clampScore(45 + sharpe * 14 + winRate * 0.18 + totalReturn * 0.1 - maxDrawdown * 0.7 + passedRatio * 18);
+  const baseReadinessScore = clampScore(25 + sharpe * 12 + passedRatio * 30 + (Number(backtest?.total_trades ?? 0) >= 20 ? 18 : 4) - maxDrawdown * 0.6);
+  const healthScore = operational.score === null ? baseHealthScore : clampScore(baseHealthScore * 0.82 + operational.score * 0.18);
+  const readinessScore = operational.readiness === null ? baseReadinessScore : clampScore(baseReadinessScore * 0.78 + operational.readiness * 0.22);
+  return { healthScore, readinessScore, passedRatio, baseHealthScore, baseReadinessScore };
+}
+
+function buildStrengths(backtest: Record<string, unknown> | null, passedRatio: number, operational: OperationalFeedback) {
+  const strengths: string[] = [];
+  if (Number(backtest?.sharpe_ratio ?? 0) > 1.2) strengths.push("Risikobereinigte Performance ist ueberdurchschnittlich.");
+  if (Number(backtest?.profit_factor ?? 0) > 1.4) strengths.push("Das Gewinn-Verlust-Verhaeltnis ist robust genug fuer weitere Validierung.");
+  if (passedRatio >= 0.5) strengths.push("Walk-Forward besteht auf mehreren Fenstern und reduziert Overfitting-Risiko.");
+  if ((operational.score ?? 0) >= 65) strengths.push("Operational Feedback aus Paper/Dry-Run ist stabil genug fuer weitere Iterationen.");
+  return strengths;
+}
+
+function buildRisks(backtest: Record<string, unknown> | null, passedRatio: number, operational: OperationalFeedback) {
+  const risks: string[] = [];
+  if (Math.abs(Number(backtest?.max_drawdown ?? 0)) > 20) risks.push("Drawdown ist fuer kontrolliertes Deployment noch zu hoch.");
+  if (Number(backtest?.total_trades ?? 0) < 15) risks.push("Zu wenige Trades machen die Statistik fragiler.");
+  if (passedRatio < 0.4) risks.push("Out-of-sample Stabilitaet ist noch nicht ausreichend.");
+  if (operational.blockedOrders > 0) risks.push("Execution-Checks werden bereits blockiert und sprechen gegen operative Robustheit.");
+  if (operational.paperPnl < 0) risks.push("Paper-Trading zeigt aktuell keinen belastbaren operativen Vorteil.");
+  return risks;
+}
+
+function buildOptimization(strategy: StrategyRow, gateReasons: string[], operational: OperationalFeedback): OptimizationPlan {
   const name = String(strategy.name ?? "").toLowerCase();
-  const rationale = [...gateReasons];
+  const rationale = [...gateReasons, ...operational.reasons];
+  const needsRiskTightening = gateReasons.includes("Drawdown zu hoch") || operational.blockedOrders > 0 || operational.paperPnl < 0;
+  const needsStability = gateReasons.includes("Walk-Forward zu instabil") || operational.errorOrders > 0;
 
   if (name.includes("rsi")) {
     const parameterPatch: OptimizationPlan["parameterPatch"] = { rsiPeriod: 12, oversold: 24, overbought: 74, exitLevel: 52 };
-    if (gateReasons.includes("Drawdown zu hoch")) parameterPatch.stopLossPercent = 1.8;
-    if (gateReasons.includes("Walk-Forward zu instabil")) parameterPatch.trendFilterEma = 200;
+    if (needsRiskTightening) parameterPatch.stopLossPercent = 1.8;
+    if (needsStability) parameterPatch.trendFilterEma = 200;
     return {
       objective: "Mean-Reversion stabilisieren und Trendfilter ergaenzen",
       parameterPatch,
@@ -70,12 +143,13 @@ function buildOptimization(strategy: StrategyRow, gateReasons: string[]): Optimi
         "Ein hoeherer Trendfilter reduziert Mean-Reversion-Trades gegen dominante Makrotrends.",
       ]),
       nextExperiment: "Teste dieselbe Variante auf 4h mit hoeherem Trendfilter und konservativerem Stop-Loss.",
-      variantLabel: "balanced",
+      variantLabel: needsRiskTightening ? "risk-tight" : "balanced",
     };
   }
 
   if (name.includes("boll")) {
     const parameterPatch: OptimizationPlan["parameterPatch"] = { period: 22, multiplier: 2.6, atrFilter: 1.2 };
+    if (needsRiskTightening) parameterPatch.stopLossPercent = 1.7;
     return {
       objective: "Breakouts selektiver handeln und Volatilitaet filtern",
       parameterPatch,
@@ -85,13 +159,15 @@ function buildOptimization(strategy: StrategyRow, gateReasons: string[]): Optimi
         "Weniger Trades sind hier akzeptabel, wenn Profit Factor und OOS-Stabilitaet steigen.",
       ]),
       nextExperiment: "Pruefe 1h gegen 4h und kombiniere den Einstieg mit einem Volumenfilter.",
-      variantLabel: "balanced",
+      variantLabel: needsRiskTightening ? "risk-tight" : "balanced",
     };
   }
 
   if (name.includes("macd")) {
     const parameterPatch: OptimizationPlan["parameterPatch"] = { fastPeriod: 10, slowPeriod: 24, signalPeriod: 6, confirmationEma: 100 };
     if (gateReasons.includes("Profit Factor zu schwach")) parameterPatch.takeProfitPercent = 3.2;
+    if (needsRiskTightening) parameterPatch.stopLossPercent = 1.9;
+    if (needsStability) parameterPatch.confirmationBars = 2;
     return {
       objective: "Trendfolge entrauschen und Whipsaws reduzieren",
       parameterPatch,
@@ -101,7 +177,7 @@ function buildOptimization(strategy: StrategyRow, gateReasons: string[]): Optimi
         "Leicht langsamere MACD-Parameter helfen, impulsive Fehlsignale auszusortieren.",
       ]),
       nextExperiment: "Teste Multi-Timeframe-Bestaetigung mit 4h-Filter und 1h-Einstieg.",
-      variantLabel: "balanced",
+      variantLabel: needsRiskTightening ? "risk-tight" : needsStability ? "stability" : "balanced",
     };
   }
 
@@ -114,11 +190,11 @@ function buildOptimization(strategy: StrategyRow, gateReasons: string[]): Optimi
       "Ein klarerer Risikorahmen hilft, Drawdowns frueher abzufangen.",
     ]),
     nextExperiment: "Vergleiche 4h und 1d inklusive hoeherer Slippage-Szenarien.",
-    variantLabel: "balanced",
+    variantLabel: needsRiskTightening ? "risk-tight" : needsStability ? "stability" : "balanced",
   };
 }
 
-function buildVariantPlans(strategy: StrategyRow, optimization: OptimizationPlan, gateReasons: string[]) {
+function buildVariantPlans(strategy: StrategyRow, optimization: OptimizationPlan, gateReasons: string[], operational: OperationalFeedback) {
   const basePlan: OptimizationPlan = {
     ...optimization,
     variantLabel: optimization.variantLabel ?? "balanced",
@@ -134,6 +210,7 @@ function buildVariantPlans(strategy: StrategyRow, optimization: OptimizationPlan
     rationale: dedupe([
       ...optimization.rationale,
       "Diese Variante priorisiert Kapitalerhalt und begrenzt Ausreisser frueher.",
+      ...(operational.blockedOrders > 0 ? ["Geblockte Execution-Checks sprechen fuer eine engere Risiko-Variante."] : []),
     ]),
     nextExperiment: "Pruefe, ob die tightere Risikosteuerung den Drawdown deutlich senkt, ohne die Passrate zu zerstoeren.",
     variantLabel: "risk-tight",
@@ -149,7 +226,8 @@ function buildVariantPlans(strategy: StrategyRow, optimization: OptimizationPlan
     rationale: dedupe([
       ...optimization.rationale,
       "Diese Variante fuegt mehr Bestaetigung hinzu, um Walk-Forward-Stabilitaet zu verbessern.",
-      ...gateReasons.includes("Walk-Forward zu instabil") ? ["Der Fokus liegt explizit auf OOS-Robustheit."] : [],
+      ...(gateReasons.includes("Walk-Forward zu instabil") ? ["Der Fokus liegt explizit auf OOS-Robustheit."] : []),
+      ...(operational.errorOrders > 0 ? ["Fehlerhafte oder instabile Execution-Checks sprechen fuer mehr Signalkonfirmation."] : []),
     ]),
     nextExperiment: "Vergleiche gleiche Parameter auf 1h und 4h, um stabilere Regime zu finden.",
     variantLabel: "stability",
@@ -158,7 +236,7 @@ function buildVariantPlans(strategy: StrategyRow, optimization: OptimizationPlan
   return [basePlan, riskTightPlan, stabilityPlan];
 }
 
-function buildVariantPayload(strategy: StrategyRow, optimization: OptimizationPlan, gateReasons: string[], index = 0) {
+function buildVariantPayload(strategy: StrategyRow, optimization: OptimizationPlan, gateReasons: string[], operational: OperationalFeedback, index = 0) {
   const variantStamp = new Date().toISOString().slice(0, 16).replace(/[T:]/g, "-");
   const currentParameters = typeof strategy.parameters === "object" && strategy.parameters ? strategy.parameters : {};
   const tags = Array.isArray(strategy.tags) ? strategy.tags : [];
@@ -168,6 +246,7 @@ function buildVariantPayload(strategy: StrategyRow, optimization: OptimizationPl
     "auto-optimized",
     `variant:${optimization.variantLabel ?? "balanced"}`,
     ...gateReasons.map((reason) => `gate:${reason.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`),
+    ...operational.reasons.slice(0, 3).map((reason) => `ops:${reason.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`),
   ]);
 
   return {
@@ -182,6 +261,7 @@ function buildVariantPayload(strategy: StrategyRow, optimization: OptimizationPl
       `Ziel: ${optimization.objective}`,
       optimization.variantLabel ? `Variantentyp: ${optimization.variantLabel}` : null,
       gateReasons.length > 0 ? `Gate-Fails: ${gateReasons.join(", ")}` : null,
+      operational.reasons.length > 0 ? `Operational Feedback: ${operational.reasons.join(", ")}` : null,
       `Naechster Test: ${optimization.nextExperiment}`,
     ].filter(Boolean).join("\n\n"),
     parameters: {
@@ -191,6 +271,7 @@ function buildVariantPayload(strategy: StrategyRow, optimization: OptimizationPl
       optimizationObjective: optimization.objective,
       optimizationGeneratedAt: new Date().toISOString(),
       variantLabel: optimization.variantLabel ?? "balanced",
+      operationalFocus: operational.reasons,
     },
     tags: mergedTags,
   };
@@ -214,13 +295,19 @@ Deno.serve(async (req) => {
         (strategies ?? []).map(async (strategy) => {
           const { data: backtests } = await supabase.from("backtests").select("*").eq("strategy_id", strategy.id).order("created_at", { ascending: false }).limit(1);
           const { data: wf } = await supabase.from("walkforward_results").select("*").eq("strategy_id", strategy.id);
-          const scoring = scoreStrategy(backtests?.[0] ?? null, wf ?? []);
+          const { data: paperPortfolios } = await supabase.from("paper_portfolio").select("*").eq("strategy_id", strategy.id).order("updated_at", { ascending: false }).limit(1);
+          const { data: livePortfolios } = await supabase.from("live_portfolios").select("*").eq("strategy_id", strategy.id).order("updated_at", { ascending: false }).limit(1);
+          const { data: liveOrders } = await supabase.from("live_orders").select("*").eq("strategy_id", strategy.id).order("created_at", { ascending: false }).limit(12);
+          const operational = computeOperationalFeedback(paperPortfolios?.[0] ?? null, livePortfolios?.[0] ?? null, liveOrders ?? []);
+          const scoring = scoreStrategy(backtests?.[0] ?? null, wf ?? [], operational);
           return {
             strategy_id: strategy.id,
             strategy_name: strategy.name,
             symbol: strategy.symbol,
             health_score: scoring.healthScore,
             readiness_score: scoring.readinessScore,
+            operational_score: operational.score,
+            blocked_checks: operational.blockedOrders,
             latest_sharpe: Number(backtests?.[0]?.sharpe_ratio ?? 0),
             passed_ratio: scoring.passedRatio,
           };
@@ -239,15 +326,19 @@ Deno.serve(async (req) => {
     const { data: backtests } = await supabase.from("backtests").select("*").eq("strategy_id", strategy.id).order("created_at", { ascending: false }).limit(1);
     const { data: wf } = await supabase.from("walkforward_results").select("*").eq("strategy_id", strategy.id);
     const { data: riskRules } = await supabase.from("risk_rules").select("*").or(`strategy_id.eq.${strategy.id},is_global.eq.true`).order("updated_at", { ascending: false });
+    const { data: paperPortfolios } = await supabase.from("paper_portfolio").select("*").eq("strategy_id", strategy.id).order("updated_at", { ascending: false }).limit(1);
+    const { data: livePortfolios } = await supabase.from("live_portfolios").select("*").eq("strategy_id", strategy.id).order("updated_at", { ascending: false }).limit(1);
+    const { data: liveOrders } = await supabase.from("live_orders").select("*").eq("strategy_id", strategy.id).order("created_at", { ascending: false }).limit(12);
     const latestBacktest = backtests?.[0] ?? null;
     const walkforward = wf ?? [];
-    const scoring = scoreStrategy(latestBacktest, walkforward);
+    const operational = computeOperationalFeedback(paperPortfolios?.[0] ?? null, livePortfolios?.[0] ?? null, liveOrders ?? []);
+    const scoring = scoreStrategy(latestBacktest, walkforward, operational);
     const qualityGate = evaluateQualityGates({
       backtest: latestBacktest,
       walkforward,
       riskRule: (riskRules ?? []).find((rule) => rule.strategy_id === strategy.id) ?? (riskRules ?? []).find((rule) => rule.is_global) ?? null,
     });
-    const optimization = buildOptimization(strategy as StrategyRow, qualityGate.reasons);
+    const optimization = buildOptimization(strategy as StrategyRow, qualityGate.reasons, operational);
 
     if (action === "optimize") {
       return Response.json(
@@ -257,13 +348,14 @@ Deno.serve(async (req) => {
           optimization,
           metrics: latestBacktest,
           qualityGate,
+          operational,
         },
         { headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
     }
 
     if (action === "create-variant") {
-      const payload = buildVariantPayload(strategy as StrategyRow, optimization, qualityGate.reasons);
+      const payload = buildVariantPayload(strategy as StrategyRow, optimization, qualityGate.reasons, operational);
       const { data: variant, error: variantError } = await supabase.from("strategies").insert(payload).select("*").single();
       if (variantError || !variant) throw variantError ?? new Error("Variant creation failed.");
 
@@ -273,6 +365,7 @@ Deno.serve(async (req) => {
           strategy: { id: strategy.id, name: strategy.name, symbol: strategy.symbol },
           optimization,
           qualityGate,
+          operational,
           variant,
         },
         { headers: { ...corsHeaders, "Content-Type": "application/json" } },
@@ -280,8 +373,8 @@ Deno.serve(async (req) => {
     }
 
     if (action === "create-variant-pack") {
-      const plans = buildVariantPlans(strategy as StrategyRow, optimization, qualityGate.reasons);
-      const payloads = plans.map((plan, index) => buildVariantPayload(strategy as StrategyRow, plan, qualityGate.reasons, index));
+      const plans = buildVariantPlans(strategy as StrategyRow, optimization, qualityGate.reasons, operational);
+      const payloads = plans.map((plan, index) => buildVariantPayload(strategy as StrategyRow, plan, qualityGate.reasons, operational, index));
       const { data: variants, error: variantsError } = await supabase.from("strategies").insert(payloads).select("*");
       if (variantsError || !variants) throw variantsError ?? new Error("Variant pack creation failed.");
 
@@ -291,6 +384,7 @@ Deno.serve(async (req) => {
           strategy: { id: strategy.id, name: strategy.name, symbol: strategy.symbol },
           optimization,
           qualityGate,
+          operational,
           variants,
         },
         { headers: { ...corsHeaders, "Content-Type": "application/json" } },
@@ -302,15 +396,18 @@ Deno.serve(async (req) => {
         ok: true,
         strategy: { id: strategy.id, name: strategy.name, symbol: strategy.symbol, timeframe: strategy.timeframe },
         scores: scoring,
-        strengths: buildStrengths(latestBacktest, scoring.passedRatio),
-        risks: buildRisks(latestBacktest, scoring.passedRatio),
-        recommendations: [
+        strengths: buildStrengths(latestBacktest, scoring.passedRatio, operational),
+        risks: buildRisks(latestBacktest, scoring.passedRatio, operational),
+        recommendations: dedupe([
           "Lass nach jeder Parameteranpassung einen neuen Walk-Forward-Lauf mit identischem Zeitraum laufen.",
           "Teste mindestens ein hoeheres Slippage-Szenario fuer realistischere Robustheit.",
           "Setze fuer Live-Freigabe Mindestgrenzen fuer Sharpe, Drawdown und Walk-Forward-Passrate.",
-        ],
+          ...(operational.blockedOrders > 0 ? ["Behebe zuerst blockierte Dry-Run-Signale, bevor neue Varianten aggressiver werden."] : []),
+          ...(operational.paperPnl < 0 ? ["Paper-Trading spricht fuer defensivere Varianten mit engerem Risiko-Rahmen."] : []),
+        ]),
         metrics: latestBacktest,
         qualityGate,
+        operational,
         optimization,
       },
       { headers: { ...corsHeaders, "Content-Type": "application/json" } },

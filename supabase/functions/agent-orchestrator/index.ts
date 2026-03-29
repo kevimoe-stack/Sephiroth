@@ -38,6 +38,54 @@ function buildResearchConfig(backtest: Record<string, unknown> | null) {
   };
 }
 
+function clampScore(value: number) {
+  return Math.max(0, Math.min(100, Math.round(value)));
+}
+
+function computeOperationalFeedback(
+  paperPortfolio: Record<string, unknown> | null,
+  livePortfolio: Record<string, unknown> | null,
+  liveOrders: Array<Record<string, unknown>>,
+) {
+  const blockedOrders = liveOrders.filter((order) => String(order.status ?? "") === "blocked").length;
+  const errorOrders = liveOrders.filter((order) => Boolean(order.error_message)).length;
+  const executedOrders = liveOrders.filter((order) => ["simulated", "dry-run", "filled"].includes(String(order.status ?? ""))).length;
+  const paperTrades = Number(paperPortfolio?.total_trades ?? 0);
+  const paperPnl = Number(paperPortfolio?.total_pnl ?? 0);
+  const paperDrawdown = Math.abs(Number(paperPortfolio?.max_drawdown ?? 0));
+  const paperWinRate = paperTrades > 0 ? Number(paperPortfolio?.winning_trades ?? 0) / paperTrades : 0;
+  const blockedRatio = liveOrders.length > 0 ? blockedOrders / liveOrders.length : 0;
+  const hasOperationalData = Boolean(paperPortfolio) || Boolean(livePortfolio) || liveOrders.length > 0;
+  const score = hasOperationalData
+    ? clampScore(
+        50 +
+          Math.min(executedOrders, 6) * 5 +
+          Math.min(paperTrades, 30) * 0.6 +
+          paperWinRate * 20 +
+          Math.min(Math.max(paperPnl / 50, -20), 20) -
+          blockedRatio * 28 -
+          errorOrders * 8 -
+          paperDrawdown * 1.1,
+      )
+    : null;
+
+  return {
+    score,
+    blockedOrders,
+    errorOrders,
+    executedOrders,
+    paperTrades,
+    paperPnl,
+    paperDrawdown,
+    reasons: [
+      ...(blockedOrders > 0 ? [`${blockedOrders} blockierte Execution-Checks`] : []),
+      ...(errorOrders > 0 ? [`${errorOrders} Execution-Checks mit Fehlermeldung`] : []),
+      ...(paperPnl < 0 ? ["Paper-PnL negativ"] : []),
+      ...(paperDrawdown > 10 ? ["Paper Drawdown erhoeht"] : []),
+    ],
+  };
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -77,6 +125,12 @@ Deno.serve(async (req) => {
     if (walkforwardError) throw walkforwardError;
     const { data: riskRules, error: riskRuleError } = await supabase.from("risk_rules").select("*").order("updated_at", { ascending: false });
     if (riskRuleError) throw riskRuleError;
+    const { data: paperPortfolios, error: paperError } = await supabase.from("paper_portfolio").select("*").order("updated_at", { ascending: false });
+    if (paperError) throw paperError;
+    const { data: livePortfolios, error: liveError } = await supabase.from("live_portfolios").select("*").order("updated_at", { ascending: false });
+    if (liveError) throw liveError;
+    const { data: liveOrders, error: liveOrdersError } = await supabase.from("live_orders").select("*").order("created_at", { ascending: false });
+    if (liveOrdersError) throw liveOrdersError;
 
     const allStrategies = strategies ?? [];
     const variants = allStrategies.filter(isAgentVariant);
@@ -88,7 +142,20 @@ Deno.serve(async (req) => {
         const latestBacktest = (backtests ?? []).find((item) => item.strategy_id === strategy.id) ?? null;
         const strategyWalkforward = (walkforward ?? []).filter((item) => item.strategy_id === strategy.id);
         const qualityGate = evaluateQualityGates({ backtest: latestBacktest, walkforward: strategyWalkforward, riskRule: globalRiskRule });
-        return { strategy, latestBacktest, qualityGate };
+        const paperPortfolio = (paperPortfolios ?? []).find((item) => item.strategy_id === strategy.id) ?? null;
+        const livePortfolio = (livePortfolios ?? []).find((item) => item.strategy_id === strategy.id) ?? null;
+        const strategyOrders = (liveOrders ?? []).filter((item) => item.strategy_id === strategy.id).slice(0, 12);
+        const operational = computeOperationalFeedback(paperPortfolio, livePortfolio, strategyOrders);
+        const sharpe = Number(latestBacktest?.sharpe_ratio ?? 0);
+        const totalReturn = Number(latestBacktest?.total_return ?? 0);
+        const candidateScore =
+          sharpe * -12 +
+          Math.abs(Number(latestBacktest?.max_drawdown ?? 0)) * 2 +
+          Math.max(0, -totalReturn) * 0.4 +
+          (operational.score === null ? 0 : (100 - operational.score) * 0.45) +
+          operational.blockedOrders * 6 +
+          operational.errorOrders * 8;
+        return { strategy, latestBacktest, qualityGate, operational, candidateScore };
       })
       .filter(({ strategy, latestBacktest, qualityGate }) => {
         if (!latestBacktest) return false;
@@ -99,7 +166,7 @@ Deno.serve(async (req) => {
         if (hasRecentVariant(variants, String(strategy.id), 6)) return false;
         return true;
       })
-      .sort((left, right) => Number(left.latestBacktest?.sharpe_ratio ?? 0) - Number(right.latestBacktest?.sharpe_ratio ?? 0))
+      .sort((left, right) => right.candidateScore - left.candidateScore)
       .slice(0, 2);
 
     const optimizedParents: Array<Record<string, unknown>> = [];
@@ -127,6 +194,9 @@ Deno.serve(async (req) => {
         strategy_id: candidate.strategy.id,
         strategy_name: candidate.strategy.name,
         variants_created: packVariants.length,
+        optimization_priority: candidate.candidateScore,
+        operational_score: candidate.operational.score,
+        operational_reasons: candidate.operational.reasons,
       });
     }
 
