@@ -394,6 +394,16 @@ export function useAgentCreateVariant() {
   });
 }
 
+export function useAgentCreateVariantPack() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (strategyId: string) => invokeAgent({ action: "create-variant-pack", strategyId }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: keys.strategies });
+    },
+  });
+}
+
 export function useAgentBulkAnalyze() {
   return useMutation({
     mutationFn: async () => invokeAgent({ action: "bulk-analyze" }),

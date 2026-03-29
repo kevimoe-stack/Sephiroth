@@ -19,6 +19,7 @@ type OptimizationPlan = {
   parameterPatch: Record<string, number | string | boolean>;
   rationale: string[];
   nextExperiment: string;
+  variantLabel?: string;
 };
 
 function scoreStrategy(backtest: Record<string, unknown> | null, walkforward: Array<Record<string, unknown>>) {
@@ -69,6 +70,7 @@ function buildOptimization(strategy: StrategyRow, gateReasons: string[]): Optimi
         "Ein hoeherer Trendfilter reduziert Mean-Reversion-Trades gegen dominante Makrotrends.",
       ]),
       nextExperiment: "Teste dieselbe Variante auf 4h mit hoeherem Trendfilter und konservativerem Stop-Loss.",
+      variantLabel: "balanced",
     };
   }
 
@@ -83,6 +85,7 @@ function buildOptimization(strategy: StrategyRow, gateReasons: string[]): Optimi
         "Weniger Trades sind hier akzeptabel, wenn Profit Factor und OOS-Stabilitaet steigen.",
       ]),
       nextExperiment: "Pruefe 1h gegen 4h und kombiniere den Einstieg mit einem Volumenfilter.",
+      variantLabel: "balanced",
     };
   }
 
@@ -98,6 +101,7 @@ function buildOptimization(strategy: StrategyRow, gateReasons: string[]): Optimi
         "Leicht langsamere MACD-Parameter helfen, impulsive Fehlsignale auszusortieren.",
       ]),
       nextExperiment: "Teste Multi-Timeframe-Bestaetigung mit 4h-Filter und 1h-Einstieg.",
+      variantLabel: "balanced",
     };
   }
 
@@ -110,10 +114,51 @@ function buildOptimization(strategy: StrategyRow, gateReasons: string[]): Optimi
       "Ein klarerer Risikorahmen hilft, Drawdowns frueher abzufangen.",
     ]),
     nextExperiment: "Vergleiche 4h und 1d inklusive hoeherer Slippage-Szenarien.",
+    variantLabel: "balanced",
   };
 }
 
-function buildVariantPayload(strategy: StrategyRow, optimization: OptimizationPlan, gateReasons: string[]) {
+function buildVariantPlans(strategy: StrategyRow, optimization: OptimizationPlan, gateReasons: string[]) {
+  const basePlan: OptimizationPlan = {
+    ...optimization,
+    variantLabel: optimization.variantLabel ?? "balanced",
+  };
+
+  const riskTightPlan: OptimizationPlan = {
+    objective: `${optimization.objective} mit engerem Risiko-Rahmen`,
+    parameterPatch: {
+      ...optimization.parameterPatch,
+      stopLossPercent: Number(optimization.parameterPatch.stopLossPercent ?? 1.4),
+      takeProfitPercent: Number(optimization.parameterPatch.takeProfitPercent ?? 2.4),
+    },
+    rationale: dedupe([
+      ...optimization.rationale,
+      "Diese Variante priorisiert Kapitalerhalt und begrenzt Ausreisser frueher.",
+    ]),
+    nextExperiment: "Pruefe, ob die tightere Risikosteuerung den Drawdown deutlich senkt, ohne die Passrate zu zerstoeren.",
+    variantLabel: "risk-tight",
+  };
+
+  const stabilityPlan: OptimizationPlan = {
+    objective: `${optimization.objective} mit Stabilitaets-Filter`,
+    parameterPatch: {
+      ...optimization.parameterPatch,
+      trendFilterEma: Number(optimization.parameterPatch.trendFilterEma ?? 200),
+      confirmationBars: 2,
+    },
+    rationale: dedupe([
+      ...optimization.rationale,
+      "Diese Variante fuegt mehr Bestaetigung hinzu, um Walk-Forward-Stabilitaet zu verbessern.",
+      ...gateReasons.includes("Walk-Forward zu instabil") ? ["Der Fokus liegt explizit auf OOS-Robustheit."] : [],
+    ]),
+    nextExperiment: "Vergleiche gleiche Parameter auf 1h und 4h, um stabilere Regime zu finden.",
+    variantLabel: "stability",
+  };
+
+  return [basePlan, riskTightPlan, stabilityPlan];
+}
+
+function buildVariantPayload(strategy: StrategyRow, optimization: OptimizationPlan, gateReasons: string[], index = 0) {
   const variantStamp = new Date().toISOString().slice(0, 16).replace(/[T:]/g, "-");
   const currentParameters = typeof strategy.parameters === "object" && strategy.parameters ? strategy.parameters : {};
   const tags = Array.isArray(strategy.tags) ? strategy.tags : [];
@@ -121,11 +166,12 @@ function buildVariantPayload(strategy: StrategyRow, optimization: OptimizationPl
     ...tags,
     "agent-variant",
     "auto-optimized",
+    `variant:${optimization.variantLabel ?? "balanced"}`,
     ...gateReasons.map((reason) => `gate:${reason.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`),
   ]);
 
   return {
-    name: `${String(strategy.name ?? "Strategie")} | Variant ${variantStamp}`,
+    name: `${String(strategy.name ?? "Strategie")} | Variant ${variantStamp}-${index + 1}`,
     symbol: String(strategy.symbol ?? "BTCUSDT"),
     timeframe: String(strategy.timeframe ?? "4h"),
     asset_class: String(strategy.asset_class ?? "crypto"),
@@ -134,6 +180,7 @@ function buildVariantPayload(strategy: StrategyRow, optimization: OptimizationPl
     description: [
       `Agent-Variante fuer: ${String(strategy.name ?? "Strategie")}`,
       `Ziel: ${optimization.objective}`,
+      optimization.variantLabel ? `Variantentyp: ${optimization.variantLabel}` : null,
       gateReasons.length > 0 ? `Gate-Fails: ${gateReasons.join(", ")}` : null,
       `Naechster Test: ${optimization.nextExperiment}`,
     ].filter(Boolean).join("\n\n"),
@@ -143,6 +190,7 @@ function buildVariantPayload(strategy: StrategyRow, optimization: OptimizationPl
       parentStrategyId: strategy.id,
       optimizationObjective: optimization.objective,
       optimizationGeneratedAt: new Date().toISOString(),
+      variantLabel: optimization.variantLabel ?? "balanced",
     },
     tags: mergedTags,
   };
@@ -183,7 +231,7 @@ Deno.serve(async (req) => {
     }
 
     const strategyId = String(body.strategyId ?? "");
-    if (!strategyId) throw new Error("strategyId is required for analyze/optimize/create-variant.");
+    if (!strategyId) throw new Error("strategyId is required for analyze/optimize/create-variant/create-variant-pack.");
 
     const { data: strategy, error: strategyError } = await supabase.from("strategies").select("*").eq("id", strategyId).single();
     if (strategyError || !strategy) throw strategyError ?? new Error("Strategy not found.");
@@ -226,6 +274,24 @@ Deno.serve(async (req) => {
           optimization,
           qualityGate,
           variant,
+        },
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
+
+    if (action === "create-variant-pack") {
+      const plans = buildVariantPlans(strategy as StrategyRow, optimization, qualityGate.reasons);
+      const payloads = plans.map((plan, index) => buildVariantPayload(strategy as StrategyRow, plan, qualityGate.reasons, index));
+      const { data: variants, error: variantsError } = await supabase.from("strategies").insert(payloads).select("*");
+      if (variantsError || !variants) throw variantsError ?? new Error("Variant pack creation failed.");
+
+      return Response.json(
+        {
+          ok: true,
+          strategy: { id: strategy.id, name: strategy.name, symbol: strategy.symbol },
+          optimization,
+          qualityGate,
+          variants,
         },
         { headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );

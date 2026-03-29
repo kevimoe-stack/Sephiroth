@@ -1,7 +1,7 @@
 ﻿import { supabase } from "@/integrations/supabase/client";
 
 export interface AgentAnalyzeRequest {
-  action: "analyze" | "optimize" | "bulk-analyze" | "create-variant";
+  action: "analyze" | "optimize" | "bulk-analyze" | "create-variant" | "create-variant-pack";
   strategyId?: string;
 }
 

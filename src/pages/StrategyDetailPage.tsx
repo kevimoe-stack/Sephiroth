@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import {
   useAgentAnalyze,
   useAgentCreateVariant,
+  useAgentCreateVariantPack,
   useAgentOptimize,
   useBacktests,
   useRiskRules,
@@ -36,6 +37,7 @@ export default function StrategyDetailPage() {
   const analyzeMutation = useAgentAnalyze();
   const optimizeMutation = useAgentOptimize();
   const createVariantMutation = useAgentCreateVariant();
+  const createVariantPackMutation = useAgentCreateVariantPack();
 
   const [startDate, setStartDate] = useState("2021-01-01");
   const [endDate, setEndDate] = useState(new Date().toISOString().slice(0, 10));
@@ -46,6 +48,7 @@ export default function StrategyDetailPage() {
   const [analysisResult, setAnalysisResult] = useState<Record<string, any> | null>(null);
   const [optimizationResult, setOptimizationResult] = useState<Record<string, any> | null>(null);
   const [createdVariant, setCreatedVariant] = useState<Record<string, any> | null>(null);
+  const [createdVariants, setCreatedVariants] = useState<Record<string, any>[]>([]);
   const [validatingVariantId, setValidatingVariantId] = useState<string | null>(null);
 
   const strategy = strategies.find((item) => item.id === id);
@@ -113,12 +116,25 @@ export default function StrategyDetailPage() {
       const result = await createVariantMutation.mutateAsync(strategy.id);
       setOptimizationResult(result);
       setCreatedVariant(result.variant ?? null);
+      setCreatedVariants(result.variant ? [result.variant] : []);
       toast.success(`Variante angelegt: ${result.variant?.name ?? "neue Variante"}`);
       if (validateImmediately && result.variant?.id) {
         await runValidationForStrategy(String(result.variant.id));
       }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Variantenerzeugung fehlgeschlagen.");
+    }
+  };
+
+  const handleCreateVariantPack = async () => {
+    try {
+      const result = await createVariantPackMutation.mutateAsync(strategy.id);
+      setOptimizationResult(result);
+      setCreatedVariant(result.variants?.[0] ?? null);
+      setCreatedVariants(Array.isArray(result.variants) ? result.variants : []);
+      toast.success(`${result.variants?.length ?? 0} Varianten angelegt.`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Varianten-Pack fehlgeschlagen.");
     }
   };
 
@@ -143,11 +159,14 @@ export default function StrategyDetailPage() {
               <Button variant="outline" onClick={() => void handleOptimize()} disabled={optimizeMutation.isPending}>
                 {optimizeMutation.isPending ? "Optimiere..." : "Optimierung ableiten"}
               </Button>
-              <Button onClick={() => void handleCreateVariant(false)} disabled={createVariantMutation.isPending}>
+              <Button onClick={() => void handleCreateVariant(false)} disabled={createVariantMutation.isPending || createVariantPackMutation.isPending}>
                 {createVariantMutation.isPending ? "Erzeuge Variante..." : "Variante erzeugen"}
               </Button>
-              <Button variant="secondary" onClick={() => void handleCreateVariant(true)} disabled={createVariantMutation.isPending || backtestMutation.isPending || walkforwardMutation.isPending}>
+              <Button variant="secondary" onClick={() => void handleCreateVariant(true)} disabled={createVariantMutation.isPending || createVariantPackMutation.isPending || backtestMutation.isPending || walkforwardMutation.isPending}>
                 {createVariantMutation.isPending || validatingVariantId ? "Erzeuge und validiere..." : "Variante + Validierung"}
+              </Button>
+              <Button variant="outline" onClick={() => void handleCreateVariantPack()} disabled={createVariantMutation.isPending || createVariantPackMutation.isPending}>
+                {createVariantPackMutation.isPending ? "Erzeuge Pack..." : "Varianten-Pack"}
               </Button>
             </div>
           </div>
@@ -157,27 +176,31 @@ export default function StrategyDetailPage() {
         </CardContent>
       </Card>
 
-      {createdVariant && (
+      {createdVariants.length > 0 && (
         <Card className="border-primary/30">
           <CardHeader>
-            <CardTitle>Zuletzt erzeugte Variante</CardTitle>
+            <CardTitle>Zuletzt erzeugte Varianten</CardTitle>
           </CardHeader>
-          <CardContent className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-            <div className="space-y-2 text-sm">
-              <p className="font-medium">{createdVariant.name}</p>
-              <p className="text-slate-500">{createdVariant.symbol} | {createdVariant.timeframe} | Status {createdVariant.status}</p>
-              <div className="flex flex-wrap gap-2">
-                {(createdVariant.tags ?? []).slice(0, 6).map((tag: string) => (
-                  <Badge key={tag} variant="outline">{tag}</Badge>
-                ))}
+          <CardContent className="space-y-4">
+            {createdVariants.map((variant) => (
+              <div key={variant.id} className="flex flex-col gap-4 rounded-xl bg-muted p-4 lg:flex-row lg:items-center lg:justify-between">
+                <div className="space-y-2 text-sm">
+                  <p className="font-medium">{variant.name}</p>
+                  <p className="text-slate-500">{variant.symbol} | {variant.timeframe} | Status {variant.status}</p>
+                  <div className="flex flex-wrap gap-2">
+                    {(variant.tags ?? []).slice(0, 6).map((tag: string) => (
+                      <Badge key={tag} variant="outline">{tag}</Badge>
+                    ))}
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-3">
+                  <Button variant="outline" onClick={() => navigate(`/strategies/${variant.id}`)}>Zur Variante</Button>
+                  <Button onClick={() => void runValidationForStrategy(String(variant.id))} disabled={validatingVariantId === variant.id || backtestMutation.isPending || walkforwardMutation.isPending}>
+                    {validatingVariantId === variant.id ? "Validiere..." : "Jetzt validieren"}
+                  </Button>
+                </div>
               </div>
-            </div>
-            <div className="flex flex-wrap gap-3">
-              <Button variant="outline" onClick={() => navigate(`/strategies/${createdVariant.id}`)}>Zur Variante</Button>
-              <Button onClick={() => void runValidationForStrategy(String(createdVariant.id))} disabled={validatingVariantId === createdVariant.id || backtestMutation.isPending || walkforwardMutation.isPending}>
-                {validatingVariantId === createdVariant.id ? "Validiere..." : "Variante jetzt validieren"}
-              </Button>
-            </div>
+            ))}
           </CardContent>
         </Card>
       )}
@@ -239,6 +262,9 @@ export default function StrategyDetailPage() {
                 <p key={item} className="text-sm text-slate-600">{item}</p>
               ))}
               {optimizationResult?.variant?.name && <p className="text-sm text-emerald-600">Neue Variante angelegt: {optimizationResult.variant.name}</p>}
+              {Array.isArray(optimizationResult?.variants) && optimizationResult.variants.length > 0 && (
+                <p className="text-sm text-emerald-600">Varianten-Pack angelegt: {optimizationResult.variants.length} Kandidaten</p>
+              )}
             </div>
           </CardContent>
         </Card>
