@@ -50,6 +50,7 @@ export default function StrategyDetailPage() {
   const [createdVariant, setCreatedVariant] = useState<Record<string, any> | null>(null);
   const [createdVariants, setCreatedVariants] = useState<Record<string, any>[]>([]);
   const [validatingVariantId, setValidatingVariantId] = useState<string | null>(null);
+  const [packValidationRunning, setPackValidationRunning] = useState(false);
 
   const strategy = strategies.find((item) => item.id === id);
   const strategyBacktests = backtests.filter((item) => item.strategy_id === id);
@@ -91,6 +92,19 @@ export default function StrategyDetailPage() {
     }
   };
 
+  const runValidationForPack = async (variants: Record<string, any>[]) => {
+    setPackValidationRunning(true);
+    try {
+      for (const variant of variants) {
+        if (!variant?.id) continue;
+        await runValidationForStrategy(String(variant.id));
+      }
+      toast.success("Varianten-Pack wurde vollstaendig validiert.");
+    } finally {
+      setPackValidationRunning(false);
+    }
+  };
+
   const handleAnalyze = async () => {
     try {
       const result = await analyzeMutation.mutateAsync(strategy.id);
@@ -126,17 +140,23 @@ export default function StrategyDetailPage() {
     }
   };
 
-  const handleCreateVariantPack = async () => {
+  const handleCreateVariantPack = async (validateImmediately = false) => {
     try {
       const result = await createVariantPackMutation.mutateAsync(strategy.id);
+      const variants = Array.isArray(result.variants) ? result.variants : [];
       setOptimizationResult(result);
-      setCreatedVariant(result.variants?.[0] ?? null);
-      setCreatedVariants(Array.isArray(result.variants) ? result.variants : []);
-      toast.success(`${result.variants?.length ?? 0} Varianten angelegt.`);
+      setCreatedVariant(variants[0] ?? null);
+      setCreatedVariants(variants);
+      toast.success(`${variants.length} Varianten angelegt.`);
+      if (validateImmediately && variants.length > 0) {
+        await runValidationForPack(variants);
+      }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Varianten-Pack fehlgeschlagen.");
     }
   };
+
+  const busy = createVariantMutation.isPending || createVariantPackMutation.isPending || backtestMutation.isPending || walkforwardMutation.isPending || packValidationRunning;
 
   return (
     <div className="space-y-6">
@@ -153,20 +173,23 @@ export default function StrategyDetailPage() {
               <p className="text-sm text-slate-500">{strategy.symbol} | {strategy.timeframe} | {strategy.asset_class}</p>
             </div>
             <div className="flex flex-wrap gap-3">
-              <Button variant="outline" onClick={() => void handleAnalyze()} disabled={analyzeMutation.isPending}>
+              <Button variant="outline" onClick={() => void handleAnalyze()} disabled={analyzeMutation.isPending || busy}>
                 {analyzeMutation.isPending ? "Analysiere..." : "Agent analysieren"}
               </Button>
-              <Button variant="outline" onClick={() => void handleOptimize()} disabled={optimizeMutation.isPending}>
+              <Button variant="outline" onClick={() => void handleOptimize()} disabled={optimizeMutation.isPending || busy}>
                 {optimizeMutation.isPending ? "Optimiere..." : "Optimierung ableiten"}
               </Button>
-              <Button onClick={() => void handleCreateVariant(false)} disabled={createVariantMutation.isPending || createVariantPackMutation.isPending}>
+              <Button onClick={() => void handleCreateVariant(false)} disabled={busy}>
                 {createVariantMutation.isPending ? "Erzeuge Variante..." : "Variante erzeugen"}
               </Button>
-              <Button variant="secondary" onClick={() => void handleCreateVariant(true)} disabled={createVariantMutation.isPending || createVariantPackMutation.isPending || backtestMutation.isPending || walkforwardMutation.isPending}>
+              <Button variant="secondary" onClick={() => void handleCreateVariant(true)} disabled={busy}>
                 {createVariantMutation.isPending || validatingVariantId ? "Erzeuge und validiere..." : "Variante + Validierung"}
               </Button>
-              <Button variant="outline" onClick={() => void handleCreateVariantPack()} disabled={createVariantMutation.isPending || createVariantPackMutation.isPending}>
+              <Button variant="outline" onClick={() => void handleCreateVariantPack(false)} disabled={busy}>
                 {createVariantPackMutation.isPending ? "Erzeuge Pack..." : "Varianten-Pack"}
+              </Button>
+              <Button variant="secondary" onClick={() => void handleCreateVariantPack(true)} disabled={busy}>
+                {createVariantPackMutation.isPending || packValidationRunning ? "Pack wird validiert..." : "Pack + Validierung"}
               </Button>
             </div>
           </div>
@@ -195,7 +218,7 @@ export default function StrategyDetailPage() {
                 </div>
                 <div className="flex flex-wrap gap-3">
                   <Button variant="outline" onClick={() => navigate(`/strategies/${variant.id}`)}>Zur Variante</Button>
-                  <Button onClick={() => void runValidationForStrategy(String(variant.id))} disabled={validatingVariantId === variant.id || backtestMutation.isPending || walkforwardMutation.isPending}>
+                  <Button onClick={() => void runValidationForStrategy(String(variant.id))} disabled={validatingVariantId === variant.id || busy}>
                     {validatingVariantId === variant.id ? "Validiere..." : "Jetzt validieren"}
                   </Button>
                 </div>
@@ -310,7 +333,7 @@ export default function StrategyDetailPage() {
                       slippageRate,
                     })
                   }
-                  disabled={backtestMutation.isPending}
+                  disabled={busy}
                 >
                   {backtestMutation.isPending ? "Backtest laeuft..." : "Echten Backtest starten"}
                 </Button>
@@ -376,7 +399,7 @@ export default function StrategyDetailPage() {
                       windows,
                     })
                   }
-                  disabled={walkforwardMutation.isPending}
+                  disabled={busy}
                 >
                   {walkforwardMutation.isPending ? "Walk-Forward laeuft..." : "Walk-Forward validieren"}
                 </Button>
