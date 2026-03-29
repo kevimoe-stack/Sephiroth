@@ -1,0 +1,32 @@
+project_id = "sephiroth"
+
+[functions.run-backtest]
+verify_jwt = false
+[functions.run-walkforward]
+verify_jwt = false
+[functions.paper-trade]
+verify_jwt = false
+[functions.execute-trade]
+verify_jwt = false
+[functions.parse-strategy]
+verify_jwt = false
+[functions.ai-agent]
+verify_jwt = false
+[functions.telegram-bot]
+verify_jwt = false
+[functions.agent-tournament]
+verify_jwt = false
+[functions.agent-lifecycle]
+verify_jwt = false
+[functions.agent-monitor]
+verify_jwt = false
+[functions.agent-orchestrator]
+verify_jwt = false
+[functions.agent-rebalance]
+verify_jwt = false
+[functions.agent-scheduler]
+verify_jwt = false
+[functions.agent-regime]
+verify_jwt = false
+[functions.agent-meta-allocation]
+verify_jwt = false
