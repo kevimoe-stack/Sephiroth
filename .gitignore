@@ -1,6 +1,7 @@
 node_modules/
 dist/
 .env
+supabase/.temp/
 *.tsbuildinfo
 tailwind.config.js
 tailwind.config.d.ts

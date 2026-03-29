@@ -1,4 +1,4 @@
-import { useState } from "react";
+ï»¿import { useState } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -19,7 +19,7 @@ export default function PaperTradingPage() {
       <Card>
         <CardHeader><CardTitle>Paper Trading starten</CardTitle></CardHeader>
         <CardContent className="space-y-4 text-sm text-slate-500">
-          <p>Strategien verfügbar: {strategies.length}</p>
+          <p>Strategien verfuegbar: {strategies.length}</p>
           <div className="flex flex-wrap gap-3">
             <select
               className="min-w-[240px] rounded-xl border border-border bg-background px-3 py-2 text-foreground"
@@ -31,7 +31,7 @@ export default function PaperTradingPage() {
               ))}
             </select>
             <Button onClick={() => paperAction.mutate({ action: "start", strategyId: selectedStrategyId })} disabled={!selectedStrategyId || paperAction.isPending}>Start</Button>
-            <Button variant="outline" onClick={() => paperAction.mutate({ action: "check", strategyId: selectedStrategyId })} disabled={!selectedStrategyId || paperAction.isPending}>Signale prüfen</Button>
+            <Button variant="outline" onClick={() => paperAction.mutate({ action: "check", strategyId: selectedStrategyId })} disabled={!selectedStrategyId || paperAction.isPending}>Signale pruefen</Button>
             <Button variant="destructive" onClick={() => paperAction.mutate({ action: "stop", strategyId: selectedStrategyId })} disabled={!selectedStrategyId || paperAction.isPending}>Stop</Button>
           </div>
           {paperAction.data?.signalType && (

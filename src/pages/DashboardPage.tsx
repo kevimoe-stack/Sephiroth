@@ -1,4 +1,4 @@
-import { Activity, Crown, Percent, Sigma } from "lucide-react";
+ï»¿import { Activity, Crown, Percent, Sigma } from "lucide-react";
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { KpiCard } from "@/components/dashboard/KpiCard";
 import { StrategyRankingTable } from "@/components/dashboard/StrategyRankingTable";
@@ -27,9 +27,9 @@ export default function DashboardPage() {
     <div className="space-y-8">
       <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <KpiCard title="Strategien" value={String(strategies.length)} subtitle="Aktive und Draft-Strategien" icon={Sigma} />
-        <KpiCard title="Bester Sharpe" value={formatNumber(bestSharpe)} subtitle="Über alle Backtests" icon={Activity} />
-        <KpiCard title="Ø Max Drawdown" value={formatPercent(avgDrawdown)} subtitle="Gefiltert ohne eliminierte Strategien" icon={Percent} />
-        <KpiCard title="Champion" value={champion?.name ?? "–"} subtitle={champion ? `Fitness ${formatNumber(tournament.champion?.fitnessScore ?? 0)}` : "Noch nicht gesetzt"} icon={Crown} />
+        <KpiCard title="Bester Sharpe" value={formatNumber(bestSharpe)} subtitle="Ueber alle Backtests" icon={Activity} />
+        <KpiCard title="Avg Max Drawdown" value={formatPercent(avgDrawdown)} subtitle="Gefiltert ohne eliminierte Strategien" icon={Percent} />
+        <KpiCard title="Champion" value={champion?.name ?? "-"} subtitle={champion ? `Fitness ${formatNumber(tournament.champion?.fitnessScore ?? 0)}` : "Noch nicht gesetzt"} icon={Crown} />
       </section>
 
       <section className="grid gap-6 xl:grid-cols-[1.4fr_0.8fr]">

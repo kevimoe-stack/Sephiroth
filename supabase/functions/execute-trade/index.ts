@@ -19,8 +19,8 @@ Deno.serve(async (req) => {
     if (!action || !strategyId) throw new Error("action and strategyId are required.");
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
-    const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
-    if (!supabaseUrl || !serviceRoleKey) throw new Error("Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY.");
+    const serviceRoleKey = Deno.env.get("SERVICE_ROLE_KEY") ?? Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+    if (!supabaseUrl || !serviceRoleKey) throw new Error("Missing SUPABASE_URL or SERVICE_ROLE_KEY.");
     const supabase = createClient(supabaseUrl, serviceRoleKey);
 
     const { data: strategy, error: strategyError } = await supabase.from("strategies").select("*").eq("id", strategyId).single();

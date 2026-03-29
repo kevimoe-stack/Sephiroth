@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+ï»¿import { useMemo, useState } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -70,7 +70,7 @@ export default function AgentPage() {
                     <span className="font-medium text-foreground">{row.strategy_name}</span>
                     <span>Health {formatNumber(row.health_score)}</span>
                   </div>
-                  <p className="mt-2">Readiness {formatNumber(row.readiness_score)} · Sharpe {formatNumber(row.latest_sharpe)}</p>
+                  <p className="mt-2">Readiness {formatNumber(row.readiness_score)} | Sharpe {formatNumber(row.latest_sharpe)}</p>
                 </div>
               ))}
             </div>
@@ -84,10 +84,10 @@ export default function AgentPage() {
             <div className="grid gap-3 md:grid-cols-[1fr_auto]">
               <Input placeholder="Strategie-ID" value={selectedStrategyId} onChange={(event) => setSelectedStrategyId(event.target.value)} />
               <Button onClick={() => selectedStrategy && analyzeMutation.mutate(selectedStrategy.id)} disabled={analyzeMutation.isPending || !selectedStrategy}>
-                {analyzeMutation.isPending ? "Analysiere..." : "Analyse ausführen"}
+                {analyzeMutation.isPending ? "Analysiere..." : "Analyse ausfuehren"}
               </Button>
             </div>
-            {selectedStrategy && <p className="text-sm text-slate-500">Gewählte Strategie: <span className="font-medium text-foreground">{selectedStrategy.name}</span></p>}
+            {selectedStrategy && <p className="text-sm text-slate-500">Gewaehlte Strategie: <span className="font-medium text-foreground">{selectedStrategy.name}</span></p>}
             {analyzeMutation.data?.ok && (
               <div className="grid gap-4 md:grid-cols-2">
                 <div className="rounded-xl bg-muted p-4 text-sm text-slate-500">
@@ -102,7 +102,7 @@ export default function AgentPage() {
                   ))}
                 </div>
                 <div className="rounded-xl bg-muted p-4 text-sm text-slate-500">
-                  <p className="font-medium text-foreground">Stärken</p>
+                  <p className="font-medium text-foreground">Staerken</p>
                   {(analyzeMutation.data.strengths ?? []).map((item: string) => (
                     <p key={item} className="mt-2">{item}</p>
                   ))}

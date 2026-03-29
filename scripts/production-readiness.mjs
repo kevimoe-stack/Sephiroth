@@ -31,10 +31,10 @@ const requiredMigrations = [
   "20260327_000001_init.sql",
   "20260328_000002_agent_tournament.sql",
   "20260329_000003_agent_lifecycle.sql",
-  "20260329_000004_agent_monitoring.sql",
-  "20260329_000005_agent_jobs.sql",
-  "20260329_000006_agent_scheduler_rebalance.sql",
-  "20260329_000007_agent_regime_meta.sql",
+  "20260329000004_agent_monitoring.sql",
+  "20260329000005_agent_jobs.sql",
+  "20260329000006_agent_scheduler_rebalance.sql",
+  "20260329000007_agent_regime_meta.sql",
 ];
 
 function exists(relativePath) {

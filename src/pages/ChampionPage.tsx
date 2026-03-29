@@ -1,4 +1,4 @@
-import { Radar, RadarChart, PolarGrid, PolarAngleAxis, ResponsiveContainer } from "recharts";
+ï»¿import { Radar, RadarChart, PolarGrid, PolarAngleAxis, ResponsiveContainer } from "recharts";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -47,13 +47,13 @@ export default function ChampionPage() {
             <CardTitle>Champion vs Challenger</CardTitle>
             <div className="flex gap-3">
               <Button onClick={() => runTournament.mutate()} disabled={runTournament.isPending}>
-                {runTournament.isPending ? "Tournament läuft..." : "Tournament Snapshot ausführen"}
+                {runTournament.isPending ? "Tournament laeuft..." : "Tournament Snapshot ausfuehren"}
               </Button>
               <Button variant="outline" onClick={() => runLifecycle.mutate()} disabled={runLifecycle.isPending}>
-                {runLifecycle.isPending ? "Lifecycle läuft..." : "Lifecycle anwenden"}
+                {runLifecycle.isPending ? "Lifecycle laeuft..." : "Lifecycle anwenden"}
               </Button>
               <Button variant="outline" onClick={() => runMonitor.mutate()} disabled={runMonitor.isPending}>
-                {runMonitor.isPending ? "Monitoring läuft..." : "Drift prüfen"}
+                {runMonitor.isPending ? "Monitoring laeuft..." : "Drift pruefen"}
               </Button>
             </div>
           </div>
@@ -73,7 +73,7 @@ export default function ChampionPage() {
         <Card>
           <CardHeader><CardTitle>Champion</CardTitle></CardHeader>
           <CardContent className="space-y-2 text-sm text-slate-500">
-            <p className="font-medium text-foreground">{champion?.strategy.name ?? "–"}</p>
+            <p className="font-medium text-foreground">{champion?.strategy.name ?? "-"}</p>
             <p>Fitness {formatNumber(champion?.fitnessScore)}</p>
             <p>Capital Preservation {formatNumber(champion?.capitalPreservationScore)}</p>
             <p>Risk Management {formatNumber(champion?.riskManagementScore)}</p>
@@ -86,7 +86,7 @@ export default function ChampionPage() {
             {tournament.challengers.map((row) => (
               <div key={row.strategy.id} className="rounded-xl bg-muted p-4">
                 <p className="font-medium text-foreground">{row.strategy.name}</p>
-                <p className="mt-1">Fitness {formatNumber(row.fitnessScore)} · Kernel Pass</p>
+                <p className="mt-1">Fitness {formatNumber(row.fitnessScore)} | Kernel Pass</p>
               </div>
             ))}
           </CardContent>
@@ -108,8 +108,8 @@ export default function ChampionPage() {
           <CardContent className="space-y-3 text-sm text-slate-500">
             {latestLifecycle ? (
               <>
-                <p>Champion {latestLifecycle.champion_strategy_id ?? "–"}</p>
-                <p>Challenger {latestLifecycle.challenger_strategy_id ?? "–"}</p>
+                <p>Champion {latestLifecycle.champion_strategy_id ?? "-"}</p>
+                <p>Challenger {latestLifecycle.challenger_strategy_id ?? "-"}</p>
                 <p>Reserve {formatNumber((latestLifecycle.reserve_allocation ?? 0) * 100)}%</p>
               </>
             ) : <p>Noch kein Lifecycle-Run.</p>}
@@ -140,7 +140,7 @@ export default function ChampionPage() {
                     <p className="font-medium text-foreground">#{entry.rank} {strategy?.name ?? entry.strategy_id}</p>
                     <Badge variant={entry.passed_kernel ? "success" : "warning"}>{entry.passed_kernel ? "Qualified" : "Watchlist"}</Badge>
                   </div>
-                  <p className="mt-2">Fitness {formatNumber(entry.fitness_score)} · Capital Preservation {formatNumber(entry.capital_preservation_score)} · Risk {formatNumber(entry.risk_management_score)}</p>
+                  <p className="mt-2">Fitness {formatNumber(entry.fitness_score)} | Capital Preservation {formatNumber(entry.capital_preservation_score)} | Risk {formatNumber(entry.risk_management_score)}</p>
                 </div>
               );
             })}
