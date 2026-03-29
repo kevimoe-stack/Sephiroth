@@ -31,6 +31,14 @@ export interface ReadinessReport {
   nextActions: string[];
 }
 
+export interface ExecutionEligibility {
+  strategyId: string;
+  eligible: boolean;
+  readinessScore: number;
+  allowedAllocation: number;
+  blockedReasons: string[];
+}
+
 interface BuildReadinessInput {
   hasSupabaseEnv: boolean;
   strategies: Strategy[];
@@ -235,5 +243,28 @@ export function buildReadinessReport(input: BuildReadinessInput): ReadinessRepor
     warningCount,
     gates,
     nextActions,
+  };
+}
+
+export function buildExecutionEligibility(input: {
+  strategy: Strategy;
+  readinessScore: number;
+  allowedAllocation: number;
+  criticalAlerts: AgentMonitorAlert[];
+  platformReadiness: ReadinessReport;
+}) : ExecutionEligibility {
+  const blockedReasons = [
+    input.platformReadiness.score < 70 ? `Platform Readiness ${input.platformReadiness.score}% ist noch zu niedrig.` : null,
+    input.criticalAlerts.length > 0 ? `${input.criticalAlerts.length} kritische Alerts blockieren Execution.` : null,
+    input.readinessScore < 70 ? `${input.strategy.name} liegt nur bei Readiness ${input.readinessScore}.` : null,
+    input.allowedAllocation <= 0 ? "Es ist aktuell keine positive Allokation fuer diese Strategie freigegeben." : null,
+  ].filter(Boolean) as string[];
+
+  return {
+    strategyId: input.strategy.id,
+    eligible: blockedReasons.length === 0,
+    readinessScore: input.readinessScore,
+    allowedAllocation: input.allowedAllocation,
+    blockedReasons,
   };
 }

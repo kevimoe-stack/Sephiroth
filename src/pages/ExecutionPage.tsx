@@ -25,7 +25,7 @@ import {
 } from "@/hooks/use-trading-data";
 import { computeHealth } from "@/lib/analytics";
 import { buildTestnetChecklist } from "@/lib/deployment";
-import { buildReadinessReport } from "@/lib/readiness";
+import { buildExecutionEligibility, buildReadinessReport } from "@/lib/readiness";
 import { formatNumber, formatPercent } from "@/lib/utils";
 
 export default function ExecutionPage() {
@@ -63,8 +63,6 @@ export default function ExecutionPage() {
   const latestRegimeSnapshots = latestRegimeRun ? regimeSnapshots.filter((snapshot) => snapshot.regime_run_id === latestRegimeRun.id) : [];
   const latestMetaRun = metaAllocationRuns[0] ?? null;
   const latestMetaEntries = latestMetaRun ? metaAllocationEntries.filter((entry) => entry.meta_allocation_run_id === latestMetaRun.id) : [];
-  const selectedStrategyId = strategyId || strategies[0]?.id || "";
-  const selectedReadiness = readinessRows.find((row) => row.strategy.id === selectedStrategyId) ?? null;
   const criticalAlerts = monitorAlerts.filter((alert) => alert.severity === "critical" && alert.status !== "resolved");
   const executionReadiness = buildReadinessReport({
     hasSupabaseEnv,
@@ -80,9 +78,28 @@ export default function ExecutionPage() {
     activeConfig: null,
     liveOrders,
   });
-  const selectedMetaAllocation = latestMetaEntries.find((entry) => entry.strategy_id === selectedStrategyId);
-  const selectedLifecycleAllocation = latestAllocations.find((entry) => entry.strategy_id === selectedStrategyId);
-  const allowedAllocation = selectedMetaAllocation?.suggested_allocation ?? selectedLifecycleAllocation?.allocation_percent ?? 0;
+  const executionCandidates = readinessRows.map((row) => {
+    const metaAllocation = latestMetaEntries.find((entry) => entry.strategy_id === row.strategy.id);
+    const lifecycleAllocation = latestAllocations.find((entry) => entry.strategy_id === row.strategy.id);
+    const allowedAllocation = metaAllocation?.suggested_allocation ?? lifecycleAllocation?.allocation_percent ?? 0;
+    return {
+      ...row,
+      eligibility: buildExecutionEligibility({
+        strategy: row.strategy,
+        readinessScore: row.readinessScore,
+        allowedAllocation,
+        criticalAlerts,
+        platformReadiness: executionReadiness,
+      }),
+    };
+  });
+  const eligibleCandidates = executionCandidates.filter((row) => row.eligibility.eligible);
+  const blockedCandidates = executionCandidates.filter((row) => !row.eligibility.eligible);
+  const selectedStrategyId = strategyId || eligibleCandidates[0]?.strategy.id || executionCandidates[0]?.strategy.id || "";
+  const selectedCandidate = executionCandidates.find((row) => row.strategy.id === selectedStrategyId) ?? null;
+  const selectedReadiness = selectedCandidate ?? null;
+  const suggestedEligibleCandidate = selectedCandidate?.eligibility.eligible ? selectedCandidate : eligibleCandidates[0] ?? null;
+  const allowedAllocation = selectedCandidate?.eligibility.allowedAllocation ?? 0;
   const testnetChecklist = buildTestnetChecklist({
     readiness: executionReadiness,
     strategies,
@@ -95,13 +112,8 @@ export default function ExecutionPage() {
   });
   const liveBlockedReasons = [
     !hasSupabaseEnv ? "Supabase ist noch nicht angebunden." : null,
-    executionReadiness.score < 70 ? `Platform Readiness ist mit ${executionReadiness.score}% noch zu niedrig.` : null,
-    criticalAlerts.length > 0 ? `${criticalAlerts.length} kritische Alerts blockieren Live-Aktionen.` : null,
-    !selectedReadiness ? "Es ist noch keine Strategie ausgewaehlt." : null,
-    selectedReadiness && selectedReadiness.readinessScore < 70
-      ? `${selectedReadiness.strategy.name} liegt nur bei Readiness ${formatNumber(selectedReadiness.readinessScore)}.`
-      : null,
-    allowedAllocation <= 0 ? "Die aktuelle Allokation gibt kein Kapital fuer diese Strategie frei." : null,
+    !selectedCandidate ? "Es ist noch keine Strategie ausgewaehlt." : null,
+    ...(selectedCandidate?.eligibility.blockedReasons ?? []),
   ].filter(Boolean) as string[];
   const liveExecutionBlocked = liveBlockedReasons.length > 0;
 
@@ -173,11 +185,24 @@ export default function ExecutionPage() {
                   Platform Readiness {executionReadiness.score}% · Kritische Alerts {criticalAlerts.length} · Strategie-Readiness {selectedReadiness ? formatNumber(selectedReadiness.readinessScore) : "n/a"}
                 </p>
                 <p className="mt-1">Freigegebene Allokation {formatNumber(allowedAllocation * 100)}%</p>
+                <p className="mt-1">
+                  Kandidaten {eligibleCandidates.length} testnet-ready · {blockedCandidates.length} blocked
+                </p>
+                {selectedCandidate && (
+                  <p className="mt-1">
+                    Eligibility {selectedCandidate.eligibility.eligible ? "testnet-ready" : "blocked"}
+                  </p>
+                )}
                 {liveExecutionBlocked ? (
                   <div className="mt-3 space-y-2 text-rose-600">
                     {liveBlockedReasons.map((reason) => (
                       <p key={reason}>{reason}</p>
                     ))}
+                    {!selectedCandidate?.eligibility.eligible && suggestedEligibleCandidate && (
+                      <p className="pt-1 text-amber-700">
+                        Beste aktuell freigegebene Alternative: {suggestedEligibleCandidate.strategy.name}
+                      </p>
+                    )}
                   </div>
                 ) : (
                   <p className="mt-3 text-emerald-600">Die aktuelle UI-Freigabe erlaubt einen kontrollierten Dry-Run fuer diese Strategie.</p>
@@ -185,8 +210,10 @@ export default function ExecutionPage() {
               </div>
               <div className="flex flex-wrap gap-3">
                 <select className="min-w-[240px] rounded-xl border border-border bg-background px-3 py-2 text-foreground" value={selectedStrategyId} onChange={(event) => setStrategyId(event.target.value)}>
-                  {strategies.map((strategy) => (
-                    <option key={strategy.id} value={strategy.id}>{strategy.name}</option>
+                  {executionCandidates.map((row) => (
+                    <option key={row.strategy.id} value={row.strategy.id}>
+                      {row.strategy.name}{row.eligibility.eligible ? " | testnet-ready" : " | blocked"}
+                    </option>
                   ))}
                 </select>
                 <Button onClick={() => executeTrade.mutate({ action: "start", strategyId: selectedStrategyId })} disabled={!selectedStrategyId || executeTrade.isPending || liveExecutionBlocked}>Start</Button>
