@@ -212,12 +212,18 @@ function buildVariantPlans(strategy: StrategyRow, optimization: OptimizationPlan
     variantLabel: optimization.variantLabel ?? "balanced",
   };
 
+  const severeRiskStress =
+    gateReasons.includes("Drawdown zu hoch") &&
+    gateReasons.includes("Return nicht positiv") &&
+    gateReasons.includes("Walk-Forward zu instabil");
+
   const riskTightPlan: OptimizationPlan = {
     objective: `${optimization.objective} mit engerem Risiko-Rahmen`,
     parameterPatch: {
       ...optimization.parameterPatch,
       stopLossPercent: Number(optimization.parameterPatch.stopLossPercent ?? 1.4),
       takeProfitPercent: Number(optimization.parameterPatch.takeProfitPercent ?? 2.4),
+      timeframeOverride: severeRiskStress ? "4h" : undefined,
     },
     rationale: dedupe([
       ...optimization.rationale,
@@ -234,6 +240,7 @@ function buildVariantPlans(strategy: StrategyRow, optimization: OptimizationPlan
       ...optimization.parameterPatch,
       trendFilterEma: Number(optimization.parameterPatch.trendFilterEma ?? 200),
       confirmationBars: 2,
+      timeframeOverride: severeRiskStress ? "4h" : undefined,
     },
     rationale: dedupe([
       ...optimization.rationale,
@@ -261,10 +268,14 @@ function buildVariantPayload(strategy: StrategyRow, optimization: OptimizationPl
     ...operational.reasons.slice(0, 3).map((reason) => `ops:${reason.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`),
   ]);
 
+  const timeframeOverride = typeof optimization.parameterPatch.timeframeOverride === "string" ? optimization.parameterPatch.timeframeOverride : null;
+  const parameterPatch = { ...optimization.parameterPatch };
+  delete parameterPatch.timeframeOverride;
+
   return {
     name: `${String(strategy.name ?? "Strategie")} | Variant ${variantStamp}-${index + 1}`,
     symbol: String(strategy.symbol ?? "BTCUSDT"),
-    timeframe: String(strategy.timeframe ?? "4h"),
+    timeframe: timeframeOverride ?? String(strategy.timeframe ?? "4h"),
     asset_class: String(strategy.asset_class ?? "crypto"),
     status: "draft",
     is_champion: false,
@@ -278,7 +289,7 @@ function buildVariantPayload(strategy: StrategyRow, optimization: OptimizationPl
     ].filter(Boolean).join("\n\n"),
     parameters: {
       ...currentParameters,
-      ...optimization.parameterPatch,
+      ...parameterPatch,
       parentStrategyId: strategy.id,
       optimizationObjective: optimization.objective,
       optimizationGeneratedAt: new Date().toISOString(),

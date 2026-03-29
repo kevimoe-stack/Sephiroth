@@ -58,10 +58,10 @@ export default function AgentPage() {
           ? "retired"
           : !latestBacktest
             ? "awaiting-validation"
-            : (strategy.tags ?? []).includes("candidate-ready")
-              ? "candidate-ready"
-              : (strategy.tags ?? []).includes("validation-pending")
-                ? "validation-pending"
+            : strategyWalkforward.length === 0
+              ? "validation-pending"
+              : (strategy.tags ?? []).includes("candidate-ready")
+                ? "candidate-ready"
                 : "needs-improvement";
         return {
           strategy,
