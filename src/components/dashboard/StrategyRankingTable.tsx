@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+﻿import { useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -48,10 +48,11 @@ export function StrategyRankingTable({
                     <div className="flex items-center gap-3">
                       <div>
                         <p className="font-medium">{strategy.name}</p>
-                        <p className="text-xs text-slate-500">{strategy.symbol} · {strategy.timeframe}</p>
+                        <p className="text-xs text-slate-500">{strategy.symbol} | {strategy.timeframe}</p>
                       </div>
-                      {strategy.is_champion && <Badge variant="success">Champion</Badge>}
+                      {strategy.is_champion && passedKernel && <Badge variant="success">Champion</Badge>}
                       {passedKernel && <Badge variant="secondary">Qualified</Badge>}
+                      {!passedKernel && <Badge variant="warning">Watchlist</Badge>}
                     </div>
                   </TableCell>
                   <TableCell>{formatNumber(fitnessScore)}</TableCell>

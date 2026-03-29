@@ -1,4 +1,4 @@
-import type { Backtest, RiskRule, Strategy, WalkforwardResult } from "@/integrations/supabase/types";
+﻿import type { Backtest, RiskRule, Strategy, WalkforwardResult } from "@/integrations/supabase/types";
 import { computeHealth, getLatestBacktest, getWalkforwardRows } from "@/lib/analytics";
 
 export interface TournamentRow {
@@ -92,7 +92,7 @@ export function buildTournamentBoard(
 
   return {
     rows,
-    champion: rows.find((row) => row.passedKernel) ?? rows[0] ?? null,
+    champion: rows.find((row) => row.passedKernel) ?? null,
     challengers: rows.filter((row) => row.passedKernel).slice(1, 4),
     watchlist: rows.filter((row) => !row.passedKernel).slice(0, 4),
     globalRiskRule,

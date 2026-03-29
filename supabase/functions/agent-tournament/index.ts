@@ -1,4 +1,4 @@
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+﻿import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { corsHeaders } from "../_shared/cors.ts";
 
 function clampScore(value: number) {
@@ -104,10 +104,11 @@ Deno.serve(async (req) => {
       })
       .sort((left, right) => right.fitness_score - left.fitness_score);
 
-    const champion = rows.find((row) => row.passed_kernel) ?? rows[0] ?? null;
-    const challenger = rows.filter((row) => row.passed_kernel)[1] ?? rows[1] ?? null;
+    const qualifiedRows = rows.filter((row) => row.passed_kernel);
+    const champion = qualifiedRows[0] ?? null;
+    const challenger = qualifiedRows[1] ?? null;
     const runNotes = [
-      `qualified:${rows.filter((row) => row.passed_kernel).length}`,
+      `qualified:${qualifiedRows.length}`,
       `kernel:${globalRiskRule ? "global-risk-rule" : "default-thresholds"}`,
     ];
 
@@ -117,7 +118,7 @@ Deno.serve(async (req) => {
         champion_strategy_id: champion?.strategy_id ?? null,
         challenger_strategy_id: challenger?.strategy_id ?? null,
         total_candidates: rows.length,
-        qualified_candidates: rows.filter((row) => row.passed_kernel).length,
+        qualified_candidates: qualifiedRows.length,
         notes: runNotes,
       })
       .select()
@@ -141,8 +142,8 @@ Deno.serve(async (req) => {
       if (entriesError) throw entriesError;
     }
 
+    await supabase.from("strategies").update({ is_champion: false }).neq("id", "");
     if (champion?.strategy_id) {
-      await supabase.from("strategies").update({ is_champion: false }).neq("id", "");
       await supabase.from("strategies").update({ is_champion: true }).eq("id", champion.strategy_id);
     }
 
