@@ -64,6 +64,32 @@ export default function StrategiesPage() {
     },
     [backtests, strategies, walkforward],
   );
+  const pilotComparison = useMemo(() => {
+    const pilots = strategies
+      .filter((strategy) => (strategy.tags ?? []).includes("pilot"))
+      .map((strategy) => {
+        const snapshot = getResearchSnapshot(backtests, walkforward, strategy.id);
+        const score =
+          (snapshot.passRate ?? 0) * 50 +
+          (snapshot.backtest?.sharpe_ratio ?? 0) * 20 +
+          (snapshot.backtest?.total_return ?? 0) * 0.4 -
+          Math.abs(snapshot.backtest?.max_drawdown ?? 0) * 0.8 +
+          Math.min(snapshot.backtest?.total_trades ?? 0, 40) * 0.5;
+
+        return {
+          strategy,
+          snapshot,
+          score,
+        };
+      })
+      .sort((left, right) => right.score - left.score);
+
+    return {
+      pilots,
+      leader: pilots[0] ?? null,
+      challenger: pilots[1] ?? null,
+    };
+  }, [backtests, strategies, walkforward]);
 
   const handleCreatePilot = async () => {
     if (missingPilotSeeds.length === 0) {
@@ -131,6 +157,59 @@ export default function StrategiesPage() {
           <CardContent><p className="text-3xl font-semibold">{summary.stale}</p></CardContent>
         </Card>
       </div>
+
+      {pilotComparison.pilots.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Pilot-Vergleich</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {pilotComparison.leader && (
+              <div className="rounded-xl border border-success/30 bg-success/5 p-4">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <p className="font-medium text-slate-900">Aktuelle Pilot-Empfehlung</p>
+                    <p className="text-sm text-slate-500">{pilotComparison.leader.strategy.name}</p>
+                  </div>
+                  <Badge variant="success">{pilotComparison.leader.snapshot.label}</Badge>
+                </div>
+                <div className="mt-3 grid gap-3 sm:grid-cols-4 text-sm text-slate-600">
+                  <p>Return {formatPercent(pilotComparison.leader.snapshot.backtest?.total_return)}</p>
+                  <p>Sharpe {formatNumber(pilotComparison.leader.snapshot.backtest?.sharpe_ratio)}</p>
+                  <p>Max DD {formatPercent(pilotComparison.leader.snapshot.backtest?.max_drawdown)}</p>
+                  <p>Passrate {pilotComparison.leader.snapshot.passRate === null ? "-" : `${formatNumber(pilotComparison.leader.snapshot.passRate * 100, 0)}%`}</p>
+                </div>
+              </div>
+            )}
+
+            <div className="grid gap-4 md:grid-cols-2">
+              {pilotComparison.pilots.map(({ strategy, snapshot, score }) => (
+                <Link key={strategy.id} to={`/strategies/${strategy.id}`}>
+                  <div className="rounded-xl bg-muted/70 p-4 transition-colors hover:bg-muted">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div>
+                        <p className="font-medium text-slate-900">{strategy.name}</p>
+                        <p className="text-sm text-slate-500">{strategy.symbol} | {strategy.timeframe}</p>
+                      </div>
+                      <Badge variant={strategy.id === pilotComparison.leader?.strategy.id ? "success" : "secondary"}>
+                        Score {formatNumber(score)}
+                      </Badge>
+                    </div>
+                    <div className="mt-3 grid gap-2 sm:grid-cols-2 text-sm text-slate-600">
+                      <p>Status {snapshot.label}</p>
+                      <p>Research {formatDateTime(snapshot.walkforwardRun[0]?.created_at ?? snapshot.backtest?.created_at)}</p>
+                      <p>Return {formatPercent(snapshot.backtest?.total_return)}</p>
+                      <p>Sharpe {formatNumber(snapshot.backtest?.sharpe_ratio)}</p>
+                      <p>Max DD {formatPercent(snapshot.backtest?.max_drawdown)}</p>
+                      <p>Passrate {snapshot.passRate === null ? "-" : `${formatNumber(snapshot.passRate * 100, 0)}%`}</p>
+                    </div>
+                  </div>
+                </Link>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       <BulkOperationsDialog />
 
