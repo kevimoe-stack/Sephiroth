@@ -21,6 +21,22 @@ function hasExecutionWatchlistVariant(variants: Record<string, unknown>[], paren
   return variants.some((variant) => getParentStrategyId(variant) === parentStrategyId && hasQueueTag(variant, "execution-watchlist"));
 }
 
+function hasRecentQueueVariant(
+  variants: Record<string, unknown>[],
+  parentStrategyId: string,
+  tag: string,
+  freshnessHours: number,
+) {
+  const now = Date.now();
+  return variants.some((variant) => {
+    if (getParentStrategyId(variant) !== parentStrategyId) return false;
+    if (!hasQueueTag(variant, tag)) return false;
+    const updatedAt = Date.parse(String(variant.updated_at ?? variant.created_at ?? ""));
+    if (Number.isNaN(updatedAt)) return false;
+    return now - updatedAt < freshnessHours * 60 * 60 * 1000;
+  });
+}
+
 function hasRecentVariant(variants: Record<string, unknown>[], parentStrategyId: string, cooldownHours: number) {
   const now = Date.now();
   return variants.some((variant) => {
@@ -214,8 +230,11 @@ Deno.serve(async (req) => {
         if (!latestBacktest) return false;
         if (qualityGate.passed) return false;
         if (Array.isArray(strategy.tags) && strategy.tags.includes("optimizer-paused")) return false;
-        if (getPilotRole(strategy, pilotLeaderId, pilotSecondaryId) === "comparison") return false;
+        const pilotRole = getPilotRole(strategy, pilotLeaderId, pilotSecondaryId);
+        if (pilotRole === "comparison") return false;
         if (hasExecutionWatchlistVariant(variants, String(strategy.id))) return false;
+        if (pilotRole === "focus" && hasRecentQueueVariant(variants, String(strategy.id), "candidate-ready", 72)) return false;
+        if (pilotRole === "focus" && hasRecentQueueVariant(variants, String(strategy.id), "execution-watchlist", 120)) return false;
         if (variants.some((variant) => getParentStrategyId(variant) === strategy.id && (hasQueueTag(variant, "candidate-ready") || hasQueueTag(variant, "validation-pending")))) {
           return false;
         }
