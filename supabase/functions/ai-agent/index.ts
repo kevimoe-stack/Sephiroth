@@ -242,6 +242,9 @@ function buildOptimization(strategy: StrategyRow, gateReasons: string[], operati
 }
 
 function buildVariantPlans(strategy: StrategyRow, optimization: OptimizationPlan, gateReasons: string[], operational: OperationalFeedback) {
+  const tags = Array.isArray(strategy.tags) ? strategy.tags : [];
+  const isPilot = tags.includes("pilot");
+  const isTestnetTarget = tags.includes("testnet-target");
   const basePlan: OptimizationPlan = {
     ...optimization,
     variantLabel: optimization.variantLabel ?? "balanced",
@@ -286,6 +289,30 @@ function buildVariantPlans(strategy: StrategyRow, optimization: OptimizationPlan
     nextExperiment: "Vergleiche gleiche Parameter auf 1h und 4h, um stabilere Regime zu finden.",
     variantLabel: "stability",
   };
+
+  if (isPilot || isTestnetTarget) {
+    const executionTargetPlan: OptimizationPlan = {
+      objective: `${optimization.objective} mit Execution-Fokus`,
+      parameterPatch: {
+        ...optimization.parameterPatch,
+        trendFilterEma: Number(optimization.parameterPatch.trendFilterEma ?? optimization.parameterPatch.confirmationEma ?? 200),
+        confirmationBars: Math.max(Number(optimization.parameterPatch.confirmationBars ?? 2), 3),
+        minHoldBars: Math.max(Number(optimization.parameterPatch.minHoldBars ?? 3), 4),
+        stopLossPercent: Number(optimization.parameterPatch.stopLossPercent ?? 1.8),
+        takeProfitPercent: Number(optimization.parameterPatch.takeProfitPercent ?? 4.8),
+        timeframeOverride: "4h",
+      },
+      rationale: dedupe([
+        ...optimization.rationale,
+        "Pilot-Varianten werden bewusst auf stabilere, testnet-naehere Signale getrimmt statt breit zu streuen.",
+        "Der Execution-Fokus priorisiert robustere Konfirmation und geringere operative Reibung.",
+      ]),
+      nextExperiment: "Pruefe zunaechst nur diese engere Pilot-Variante gegen die bestehende Fokuslinie, bevor weitere Packs erzeugt werden.",
+      variantLabel: "execution-target",
+    };
+
+    return [riskTightPlan, executionTargetPlan];
+  }
 
   return [basePlan, riskTightPlan, stabilityPlan];
 }
