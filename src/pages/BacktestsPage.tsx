@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+﻿import { useMemo } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -45,7 +45,7 @@ export default function BacktestsPage() {
       <CardHeader>
         <CardTitle>Alle Backtests</CardTitle>
         <p className="text-sm text-slate-500">
-          Standardmaessig werden identische Wiederholungsl�ufe zusammengefasst, damit echte Unterschiede besser sichtbar werden.
+          Standardmaessig werden identische Wiederholungsläufe zusammengefasst, damit echte Unterschiede besser sichtbar werden.
           {hiddenDuplicates > 0 ? ` ${hiddenDuplicates} Duplikate sind ausgeblendet.` : ""}
         </p>
       </CardHeader>
@@ -70,7 +70,7 @@ export default function BacktestsPage() {
                 <TableRow key={backtest.id}>
                   <TableCell>{strategy?.name}</TableCell>
                   <TableCell>{formatDateTime(backtest.created_at)}</TableCell>
-                  <TableCell>{backtest.start_date} ? {backtest.end_date}</TableCell>
+                  <TableCell>{backtest.start_date} → {backtest.end_date}</TableCell>
                   <TableCell>{formatPercent(backtest.total_return)}</TableCell>
                   <TableCell>{formatNumber(backtest.sharpe_ratio)}</TableCell>
                   <TableCell>{formatPercent(backtest.max_drawdown)}</TableCell>

@@ -205,7 +205,7 @@ export default function StrategyDetailPage() {
     <div className="space-y-6">
       <Card>
         <CardHeader>
-          <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+          <div className="flex flex-col gap-4 2xl:flex-row 2xl:items-start 2xl:justify-between">
             <div className="space-y-2">
               <div className="flex flex-wrap items-center gap-3">
                 <CardTitle>{strategy.name}</CardTitle>
@@ -217,7 +217,7 @@ export default function StrategyDetailPage() {
               </div>
               <p className="text-sm text-slate-500">{strategy.symbol} | {strategy.timeframe} | {strategy.asset_class}</p>
             </div>
-            <div className="flex flex-wrap gap-3">
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:flex 2xl:flex-wrap">
               <Button variant="outline" onClick={() => void handleAnalyze()} disabled={analyzeMutation.isPending || busy}>
                 {analyzeMutation.isPending ? "Analysiere..." : "Agent analysieren"}
               </Button>
@@ -271,7 +271,7 @@ export default function StrategyDetailPage() {
                     ))}
                   </div>
                 </div>
-                <div className="flex flex-wrap gap-3">
+                <div className="grid gap-3 sm:grid-cols-2 lg:flex lg:flex-wrap">
                   <Button variant="outline" onClick={() => navigate(`/strategies/${variant.id}`)}>Zur Variante</Button>
                   <Button onClick={() => void runValidationForStrategy(String(variant.id))} disabled={validatingVariantId === variant.id || busy}>
                     {validatingVariantId === variant.id ? "Validiere..." : "Jetzt validieren"}
@@ -498,7 +498,7 @@ export default function StrategyDetailPage() {
                           <td className="px-3 py-2 align-top">{formatNumber(trade.exit_price)}</td>
                           <td className="px-3 py-2 align-top">{formatCurrency(trade.pnl)}</td>
                           <td className="px-3 py-2 align-top">{formatPercent(trade.pnl_percent)}</td>
-                          <td className="px-3 py-2 align-top text-slate-500">{trade.notes ?? "-"}</td>
+                          <td className="max-w-[220px] px-3 py-2 align-top break-words text-slate-500">{trade.notes ?? "-"}</td>
                         </tr>
                       ))}
                     </tbody>
