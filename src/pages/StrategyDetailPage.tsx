@@ -400,51 +400,51 @@ export default function StrategyDetailPage() {
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-3 lg:grid-cols-4 xl:grid-cols-7">
-              <div className="rounded-xl bg-muted p-3">
+            <div className="grid grid-cols-2 gap-3 md:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-7">
+              <div className="min-h-24 rounded-xl bg-muted p-3">
                 <p className="text-xs uppercase tracking-wide text-slate-500">Return</p>
                 <p className="mt-1 text-2xl font-semibold">{formatPercent(latestBacktest?.total_return)}</p>
               </div>
-              <div className="rounded-xl bg-muted p-3">
+              <div className="min-h-24 rounded-xl bg-muted p-3">
                 <p className="text-xs uppercase tracking-wide text-slate-500">Sharpe</p>
                 <p className="mt-1 text-2xl font-semibold">{formatNumber(latestBacktest?.sharpe_ratio)}</p>
               </div>
-              <div className="rounded-xl bg-muted p-3">
+              <div className="min-h-24 rounded-xl bg-muted p-3">
                 <p className="text-xs uppercase tracking-wide text-slate-500">Max DD</p>
                 <p className="mt-1 text-2xl font-semibold">{formatPercent(latestBacktest?.max_drawdown)}</p>
               </div>
-              <div className="rounded-xl bg-muted p-3">
+              <div className="min-h-24 rounded-xl bg-muted p-3">
                 <p className="text-xs uppercase tracking-wide text-slate-500">Win Rate</p>
                 <p className="mt-1 text-2xl font-semibold">{formatPercent(latestBacktest?.win_rate)}</p>
               </div>
-              <div className="rounded-xl bg-muted p-3">
+              <div className="min-h-24 rounded-xl bg-muted p-3">
                 <p className="text-xs uppercase tracking-wide text-slate-500">Trades</p>
                 <p className="mt-1 text-2xl font-semibold">{formatNumber(latestBacktest?.total_trades, 0)}</p>
               </div>
-              <div className="rounded-xl bg-muted p-3">
+              <div className="min-h-24 rounded-xl bg-muted p-3">
                 <p className="text-xs uppercase tracking-wide text-slate-500">Gewinner</p>
                 <p className="mt-1 text-2xl font-semibold">{formatNumber(latestBacktest?.winning_trades, 0)}</p>
               </div>
-              <div className="rounded-xl bg-muted p-3">
+              <div className="min-h-24 rounded-xl bg-muted p-3">
                 <p className="text-xs uppercase tracking-wide text-slate-500">Verlierer</p>
                 <p className="mt-1 text-2xl font-semibold">{formatNumber(latestBacktest?.losing_trades, 0)}</p>
               </div>
             </div>
 
             <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-              <div className="rounded-xl border border-border/60 p-3">
+              <div className="min-h-24 rounded-xl border border-border/60 p-3">
                 <p className="text-xs uppercase tracking-wide text-slate-500">Angezeigter Run</p>
                 <p className="mt-1 text-sm font-medium">{formatDateTime(latestBacktest?.created_at)}</p>
               </div>
-              <div className="rounded-xl border border-border/60 p-3">
+              <div className="min-h-24 rounded-xl border border-border/60 p-3">
                 <p className="text-xs uppercase tracking-wide text-slate-500">Final Capital</p>
                 <p className="mt-1 text-sm font-medium">{formatCurrency(latestBacktest?.final_capital)}</p>
               </div>
-              <div className="rounded-xl border border-border/60 p-3">
+              <div className="min-h-24 rounded-xl border border-border/60 p-3">
                 <p className="text-xs uppercase tracking-wide text-slate-500">Profit Factor</p>
                 <p className="mt-1 text-sm font-medium">{formatNumber(latestBacktest?.profit_factor)}</p>
               </div>
-              <div className="rounded-xl border border-border/60 p-3">
+              <div className="min-h-24 rounded-xl border border-border/60 p-3">
                 <p className="text-xs uppercase tracking-wide text-slate-500">Ø Haltedauer</p>
                 <p className="mt-1 text-sm font-medium">{latestBacktest?.avg_trade_duration ?? "-"}</p>
               </div>
@@ -492,13 +492,13 @@ export default function StrategyDetailPage() {
                     <tbody>
                       {latestBacktestTrades.slice(0, 12).map((trade) => (
                         <tr key={trade.id} className="border-t border-border/60">
-                          <td className="px-3 py-2">{formatDateTime(trade.entry_date)}</td>
-                          <td className="px-3 py-2">{formatDateTime(trade.exit_date)}</td>
-                          <td className="px-3 py-2">{formatNumber(trade.entry_price)}</td>
-                          <td className="px-3 py-2">{formatNumber(trade.exit_price)}</td>
-                          <td className="px-3 py-2">{formatCurrency(trade.pnl)}</td>
-                          <td className="px-3 py-2">{formatPercent(trade.pnl_percent)}</td>
-                          <td className="px-3 py-2 text-slate-500">{trade.notes ?? "-"}</td>
+                          <td className="px-3 py-2 align-top">{formatDateTime(trade.entry_date)}</td>
+                          <td className="px-3 py-2 align-top">{formatDateTime(trade.exit_date)}</td>
+                          <td className="px-3 py-2 align-top">{formatNumber(trade.entry_price)}</td>
+                          <td className="px-3 py-2 align-top">{formatNumber(trade.exit_price)}</td>
+                          <td className="px-3 py-2 align-top">{formatCurrency(trade.pnl)}</td>
+                          <td className="px-3 py-2 align-top">{formatPercent(trade.pnl_percent)}</td>
+                          <td className="px-3 py-2 align-top text-slate-500">{trade.notes ?? "-"}</td>
                         </tr>
                       ))}
                     </tbody>
