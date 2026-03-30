@@ -163,6 +163,34 @@ function bollinger(values: number[], period: number, multiplier: number) {
   };
 }
 
+function atr(candles: Candle[], period: number) {
+  const result = Array.from({ length: candles.length }, () => Number.NaN);
+  if (candles.length <= period) return result;
+  const trueRanges = candles.map((candle, index) => {
+    if (index === 0) return candle.high - candle.low;
+    const previousClose = candles[index - 1].close;
+    return Math.max(
+      candle.high - candle.low,
+      Math.abs(candle.high - previousClose),
+      Math.abs(candle.low - previousClose),
+    );
+  });
+
+  let seed = 0;
+  for (let index = 0; index < period; index += 1) {
+    seed += trueRanges[index];
+  }
+  let previous = seed / period;
+  result[period - 1] = previous;
+
+  for (let index = period; index < candles.length; index += 1) {
+    previous = ((previous * (period - 1)) + trueRanges[index]) / period;
+    result[index] = previous;
+  }
+
+  return result;
+}
+
 function createSignals(strategy: StrategyRow, candles: Candle[]) {
   const params = strategy.parameters ?? {};
   const closes = candles.map((candle) => candle.close);
@@ -198,6 +226,9 @@ function createSignals(strategy: StrategyRow, candles: Candle[]) {
       return signals;
     }
     case "macd": {
+      const confirmationPeriod = Number(params.confirmationEma ?? 0);
+      const confirmationBars = Math.max(1, Number(params.confirmationBars ?? 1));
+      const confirmation = confirmationPeriod > 0 ? ema(closes, confirmationPeriod) : [];
       const values = macd(
         closes,
         Number(params.fastPeriod ?? 12),
@@ -205,12 +236,20 @@ function createSignals(strategy: StrategyRow, candles: Candle[]) {
         Number(params.signalPeriod ?? 9),
       );
       for (let index = 1; index < candles.length; index += 1) {
+        const trendConfirmed =
+          confirmationPeriod <= 0 ||
+          Array.from({ length: confirmationBars }, (_, offset) => index - offset).every((candidateIndex) =>
+            candidateIndex >= 0 &&
+            Number.isFinite(confirmation[candidateIndex]) &&
+            closes[candidateIndex] > confirmation[candidateIndex],
+          );
         if (
           Number.isFinite(values.line[index - 1]) &&
           Number.isFinite(values.signal[index - 1]) &&
           values.line[index - 1] <= values.signal[index - 1] &&
           values.line[index] > values.signal[index] &&
-          values.line[index] > 0
+          values.line[index] > 0 &&
+          trendConfirmed
         ) {
           signals[index] = 1;
         }
@@ -237,20 +276,29 @@ function createSignals(strategy: StrategyRow, candles: Candle[]) {
       const slow = ema(closes, slowPeriod);
       const trend = ema(closes, trendPeriod);
       const rsiValues = rsi(closes, rsiPeriodValue);
+      const atrValues = atr(candles, Number(params.atrPeriod ?? 14));
+      const atrThreshold = Number(params.atrFilter ?? 0);
+      const confirmationBars = Math.max(1, Number(params.confirmationBars ?? 1));
 
       for (let index = 1; index < candles.length; index += 1) {
         const trendUp =
-          Number.isFinite(fast[index]) &&
-          Number.isFinite(slow[index]) &&
-          Number.isFinite(trend[index]) &&
-          closes[index] > trend[index] &&
-          fast[index] > slow[index];
+          Array.from({ length: confirmationBars }, (_, offset) => index - offset).every((candidateIndex) =>
+            candidateIndex >= 0 &&
+            Number.isFinite(fast[candidateIndex]) &&
+            Number.isFinite(slow[candidateIndex]) &&
+            Number.isFinite(trend[candidateIndex]) &&
+            closes[candidateIndex] > trend[candidateIndex] &&
+            fast[candidateIndex] > slow[candidateIndex],
+          );
         const recoveringPullback =
           Number.isFinite(rsiValues[index - 1]) &&
           Number.isFinite(rsiValues[index]) &&
           rsiValues[index - 1] <= pullbackRsi &&
           rsiValues[index] >= recoveryRsi;
-        if (trendUp && recoveringPullback) {
+        const volatilityConfirmed =
+          atrThreshold <= 0 ||
+          (Number.isFinite(atrValues[index]) && atrValues[index] / closes[index] * 100 <= atrThreshold * 2.5);
+        if (trendUp && recoveringPullback && volatilityConfirmed) {
           signals[index] = 1;
         }
 
@@ -336,6 +384,7 @@ async function fetchCandles(symbol: string, timeframe: string, startDate: string
 export async function runBacktestEngine(strategy: StrategyRow, config: BacktestConfig) {
   const candles = await fetchCandles(strategy.symbol, strategy.timeframe, config.startDate, config.endDate);
   const signals = createSignals(strategy, candles);
+  const params = strategy.parameters ?? {};
   const trades: Trade[] = [];
   const equityCurve: { date: string; value: number }[] = [];
   const monthlyReturns = new Map<string, number>();
@@ -345,11 +394,63 @@ export async function runBacktestEngine(strategy: StrategyRow, config: BacktestC
   let entryPrice = 0;
   let entryCapital = 0;
   let entryIndex = -1;
+  let highestPriceSinceEntry = 0;
+
+  const stopLossPercent = Number(params.stopLossPercent ?? 0);
+  const takeProfitPercent = Number(params.takeProfitPercent ?? 0);
+  const trailingStopPercent = Number(params.trailingStopPercent ?? 0);
+  const minHoldBars = Math.max(0, Number(params.minHoldBars ?? 0));
+
+  const closePosition = (index: number, executionPrice: number, exitReason: string) => {
+    const candle = candles[index];
+    const grossValue = quantity * executionPrice;
+    const fee = grossValue * config.feeRate;
+    cash = grossValue - fee;
+    trades.push({
+      direction: "long",
+      entry_date: new Date(candles[entryIndex].openTime).toISOString(),
+      exit_date: new Date(candle.closeTime).toISOString(),
+      entry_price: entryPrice,
+      exit_price: executionPrice,
+      quantity,
+      pnl: cash - entryCapital,
+      pnl_percent: ((executionPrice / entryPrice) - 1) * 100,
+      fees: fee,
+      notes: `bars-held:${index - entryIndex}|reason:${exitReason}`,
+    });
+    quantity = 0;
+    entryPrice = 0;
+    entryCapital = 0;
+    entryIndex = -1;
+    highestPriceSinceEntry = 0;
+  };
 
   for (let index = 0; index < candles.length; index += 1) {
     const candle = candles[index];
     const signal = signals[index];
     const markPrice = candle.close;
+
+    if (quantity > 0) {
+      highestPriceSinceEntry = Math.max(highestPriceSinceEntry, candle.high);
+      const heldBars = index - entryIndex;
+      const stopPrice = stopLossPercent > 0 ? entryPrice * (1 - stopLossPercent / 100) : Number.NaN;
+      const takeProfitPrice = takeProfitPercent > 0 ? entryPrice * (1 + takeProfitPercent / 100) : Number.NaN;
+      const trailingStopPrice =
+        trailingStopPercent > 0 ? highestPriceSinceEntry * (1 - trailingStopPercent / 100) : Number.NaN;
+
+      if (Number.isFinite(stopPrice) && candle.low <= stopPrice) {
+        closePosition(index, stopPrice, "stop-loss");
+      } else if (Number.isFinite(takeProfitPrice) && candle.high >= takeProfitPrice) {
+        closePosition(index, takeProfitPrice, "take-profit");
+      } else if (
+        heldBars >= minHoldBars &&
+        Number.isFinite(trailingStopPrice) &&
+        candle.low <= trailingStopPrice &&
+        trailingStopPrice > entryPrice
+      ) {
+        closePosition(index, trailingStopPrice, "trailing-stop");
+      }
+    }
 
     if (signal === 1 && quantity === 0) {
       const executionPrice = markPrice * (1 + config.slippageRate);
@@ -359,28 +460,11 @@ export async function runBacktestEngine(strategy: StrategyRow, config: BacktestC
       entryPrice = executionPrice;
       entryCapital = tradableCash;
       entryIndex = index;
+      highestPriceSinceEntry = candle.high;
       cash = 0;
-    } else if (signal === -1 && quantity > 0) {
+    } else if (signal === -1 && quantity > 0 && index - entryIndex >= minHoldBars) {
       const executionPrice = markPrice * (1 - config.slippageRate);
-      const grossValue = quantity * executionPrice;
-      const fee = grossValue * config.feeRate;
-      cash = grossValue - fee;
-      trades.push({
-        direction: "long",
-        entry_date: new Date(candles[entryIndex].openTime).toISOString(),
-        exit_date: new Date(candle.closeTime).toISOString(),
-        entry_price: entryPrice,
-        exit_price: executionPrice,
-        quantity,
-        pnl: cash - entryCapital,
-        pnl_percent: ((executionPrice / entryPrice) - 1) * 100,
-        fees: fee,
-        notes: `bars-held:${index - entryIndex}`,
-      });
-      quantity = 0;
-      entryPrice = 0;
-      entryCapital = 0;
-      entryIndex = -1;
+      closePosition(index, executionPrice, "signal-exit");
     }
 
     const equity = quantity > 0 ? quantity * markPrice : cash;
@@ -394,21 +478,7 @@ export async function runBacktestEngine(strategy: StrategyRow, config: BacktestC
 
   if (quantity > 0) {
     const last = candles[candles.length - 1];
-    const grossValue = quantity * last.close;
-    const fee = grossValue * config.feeRate;
-    cash = grossValue - fee;
-    trades.push({
-      direction: "long",
-      entry_date: new Date(candles[entryIndex].openTime).toISOString(),
-      exit_date: new Date(last.closeTime).toISOString(),
-      entry_price: entryPrice,
-      exit_price: last.close,
-      quantity,
-      pnl: cash - entryCapital,
-      pnl_percent: ((last.close / entryPrice) - 1) * 100,
-      fees: fee,
-      notes: `bars-held:${candles.length - 1 - entryIndex}`,
-    });
+    closePosition(candles.length - 1, last.close, "forced-close");
   }
 
   const finalCapital = cash || equityCurve[equityCurve.length - 1]?.value || config.initialCapital;
@@ -445,7 +515,7 @@ export async function runBacktestEngine(strategy: StrategyRow, config: BacktestC
       ? 0
       : average(
           trades.map((trade) => {
-            const notesValue = trade.notes.replace("bars-held:", "");
+            const notesValue = trade.notes.split("|")[0].replace("bars-held:", "");
             return Number(notesValue);
           }),
         );
