@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { useBacktests, useCreateStrategy, useStrategies, useWalkforwardResults } from "@/hooks/use-trading-data";
-import { computeResearchScore, getResearchSnapshot } from "@/lib/analytics";
+import { getPilotComparison, getResearchSnapshot } from "@/lib/analytics";
 import { buildPilotStrategySeeds } from "@/lib/strategy-presets";
 import { formatDateTime, formatNumber, formatPercent } from "@/lib/utils";
 
@@ -64,27 +64,7 @@ export default function StrategiesPage() {
     },
     [backtests, strategies, walkforward],
   );
-  const pilotComparison = useMemo(() => {
-    const pilots = strategies
-        .filter((strategy) => (strategy.tags ?? []).includes("pilot"))
-        .map((strategy) => {
-          const snapshot = getResearchSnapshot(backtests, walkforward, strategy.id);
-          const score = computeResearchScore(snapshot.backtest, snapshot.walkforwardRun, snapshot.passRate);
-
-        return {
-          strategy,
-          snapshot,
-          score,
-        };
-      })
-      .sort((left, right) => right.score - left.score);
-
-    return {
-      pilots,
-      leader: pilots[0] ?? null,
-      challenger: pilots[1] ?? null,
-    };
-  }, [backtests, strategies, walkforward]);
+  const pilotComparison = useMemo(() => getPilotComparison(strategies, backtests, walkforward), [backtests, strategies, walkforward]);
 
   const handleCreatePilot = async () => {
     if (missingPilotSeeds.length === 0) {
@@ -178,17 +158,21 @@ export default function StrategiesPage() {
             )}
 
             <div className="grid gap-4 md:grid-cols-2">
-              {pilotComparison.pilots.map(({ strategy, snapshot, score }) => (
+              {pilotComparison.pilots.map(({ strategy, snapshot, score, isLeadingCandidate, isSecondaryCandidate }) => (
                 <Link key={strategy.id} to={`/strategies/${strategy.id}`}>
-                  <div className="rounded-xl bg-muted/70 p-4 transition-colors hover:bg-muted">
+                  <div className={`rounded-xl p-4 transition-colors ${isLeadingCandidate ? "border border-emerald-200 bg-emerald-50/70 hover:bg-emerald-50" : isSecondaryCandidate ? "border border-slate-200 bg-slate-50 hover:bg-slate-100" : "bg-muted/70 hover:bg-muted"}`}>
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <div>
                         <p className="font-medium text-slate-900">{strategy.name}</p>
                         <p className="text-sm text-slate-500">{strategy.symbol} | {strategy.timeframe}</p>
                       </div>
-                      <Badge variant={strategy.id === pilotComparison.leader?.strategy.id ? "success" : "secondary"}>
-                        Score {formatNumber(score)}
-                      </Badge>
+                      <div className="flex flex-wrap gap-2">
+                        {isLeadingCandidate && <Badge variant="success">Pilot-Fokus</Badge>}
+                        {isSecondaryCandidate && <Badge variant="secondary">Vergleichslinie</Badge>}
+                        <Badge variant={isLeadingCandidate ? "success" : "secondary"}>
+                          Score {formatNumber(score)}
+                        </Badge>
+                      </div>
                     </div>
                     <div className="mt-3 grid gap-2 sm:grid-cols-2 text-sm text-slate-600">
                       <p>Status {snapshot.label}</p>

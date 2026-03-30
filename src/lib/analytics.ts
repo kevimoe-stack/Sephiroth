@@ -133,6 +133,32 @@ export function computeResearchScore(
   );
 }
 
+export function getPilotComparison(strategies: Strategy[], backtests: Backtest[], walkforwardRows: WalkforwardResult[]) {
+  const pilots = strategies
+    .filter((strategy) => (strategy.tags ?? []).includes("pilot"))
+    .map((strategy) => {
+      const snapshot = getResearchSnapshot(backtests, walkforwardRows, strategy.id);
+      const score = computeResearchScore(snapshot.backtest, snapshot.walkforwardRun, snapshot.passRate);
+      return {
+        strategy,
+        snapshot,
+        score,
+        isLeadingCandidate: false,
+        isSecondaryCandidate: false,
+      };
+    })
+    .sort((left, right) => right.score - left.score);
+
+  if (pilots[0]) pilots[0].isLeadingCandidate = true;
+  if (pilots[1]) pilots[1].isSecondaryCandidate = true;
+
+  return {
+    pilots,
+    leader: pilots[0] ?? null,
+    secondary: pilots[1] ?? null,
+  };
+}
+
 function clampScore(value: number) {
   return Math.max(0, Math.min(100, Math.round(value)));
 }

@@ -20,7 +20,7 @@ import {
   useWalkforwardResults,
 } from "@/hooks/use-trading-data";
 import type { WalkforwardResult } from "@/integrations/supabase/types";
-import { computeResearchScore, getResearchSnapshot } from "@/lib/analytics";
+import { getPilotComparison } from "@/lib/analytics";
 import { evaluateQualityGates } from "@/lib/quality-gates";
 import { formatCurrency, formatDateTime, formatNumber, formatPercent } from "@/lib/utils";
 
@@ -171,24 +171,10 @@ export default function StrategyDetailPage() {
     return stableStringify(displayedWalkforwardRun.strategyParamsSnapshot) === stableStringify(strategy?.parameters ?? {});
   }, [displayedWalkforwardRun?.strategyParamsSnapshot, strategy?.parameters]);
   const pilotComparison = useMemo(() => {
-    if (!strategy) return null;
-    const pilots = strategies
-      .filter((item) => (item.tags ?? []).includes("pilot"))
-      .map((item) => {
-        const snapshot = getResearchSnapshot(backtests, walkforward, item.id);
-        return {
-          strategy: item,
-          snapshot,
-          score: computeResearchScore(snapshot.backtest, snapshot.walkforwardRun, snapshot.passRate),
-        };
-      })
-      .sort((left, right) => right.score - left.score);
-
-    if (!isPilotStrategy || pilots.length === 0) return null;
-
-    const current = pilots.find((item) => item.strategy.id === strategy.id) ?? null;
-    const leader = pilots[0] ?? null;
-    return current ? { current, leader } : null;
+    if (!strategy || !isPilotStrategy) return null;
+    const comparison = getPilotComparison(strategies, backtests, walkforward);
+    const current = comparison.pilots.find((item) => item.strategy.id === strategy.id) ?? null;
+    return current ? { ...comparison, current } : null;
   }, [backtests, isPilotStrategy, strategies, strategy, walkforward]);
 
   if (!strategy) return <div>Strategie nicht gefunden.</div>;
@@ -378,6 +364,11 @@ export default function StrategyDetailPage() {
                 <p>Return {formatPercent(pilotComparison.current.snapshot.backtest?.total_return)}</p>
                 <p>Passrate {pilotComparison.current.snapshot.passRate === null ? "-" : `${formatNumber(pilotComparison.current.snapshot.passRate * 100, 0)}%`}</p>
               </div>
+              {pilotComparison.current.isLeadingCandidate && (
+                <p className="mt-3 text-emerald-700">
+                  Diese Pilotlinie ist aktuell der Hauptkandidat fuer die naechste Research- und Testnet-Stufe.
+                </p>
+              )}
               {pilotComparison.leader && pilotComparison.leader.strategy.id !== strategy.id && (
                 <p className="mt-3 text-slate-600">
                   Aktuell liegt <span className="font-medium">{pilotComparison.leader.strategy.name}</span> vorne. Diese Linie bleibt aber als Vergleich aktiv, bis wir einen klaren Testnet-Kandidaten haben.

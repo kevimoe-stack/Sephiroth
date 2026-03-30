@@ -23,7 +23,7 @@ import {
   useTournamentRuns,
   useWalkforwardResults,
 } from "@/hooks/use-trading-data";
-import { computeHealth, computeResearchScore, getResearchSnapshot } from "@/lib/analytics";
+import { computeHealth, getPilotComparison } from "@/lib/analytics";
 import { buildTestnetChecklist } from "@/lib/deployment";
 import { buildExecutionEligibility, buildReadinessReport } from "@/lib/readiness";
 import { formatNumber, formatPercent } from "@/lib/utils";
@@ -99,17 +99,8 @@ export default function ExecutionPage() {
   const selectedCandidate = executionCandidates.find((row) => row.strategy.id === selectedStrategyId) ?? null;
   const selectedReadiness = selectedCandidate ?? null;
   const suggestedEligibleCandidate = selectedCandidate?.eligibility.eligible ? selectedCandidate : eligibleCandidates[0] ?? null;
-  const pilotLeader = strategies
-    .filter((strategy) => (strategy.tags ?? []).includes("pilot"))
-    .map((strategy) => {
-      const snapshot = getResearchSnapshot(backtests, wf, strategy.id);
-      return {
-        strategy,
-        snapshot,
-        score: computeResearchScore(snapshot.backtest, snapshot.walkforwardRun, snapshot.passRate),
-      };
-    })
-    .sort((left, right) => right.score - left.score)[0] ?? null;
+  const pilotComparison = getPilotComparison(strategies, backtests, wf);
+  const pilotLeader = pilotComparison.leader;
   const allowedAllocation = selectedCandidate?.eligibility.allowedAllocation ?? 0;
   const testnetChecklist = buildTestnetChecklist({
     readiness: executionReadiness,
@@ -226,6 +217,11 @@ export default function ExecutionPage() {
                       Score {formatNumber(pilotLeader.score)} · Status {pilotLeader.snapshot.label} · Passrate{" "}
                       {pilotLeader.snapshot.passRate === null ? "-" : `${formatNumber(pilotLeader.snapshot.passRate * 100, 0)}%`}
                     </p>
+                    {pilotComparison.secondary && (
+                      <p className="mt-1 text-xs text-slate-600">
+                        Vergleichslinie aktuell: {pilotComparison.secondary.strategy.name}
+                      </p>
+                    )}
                   </div>
                 )}
               </div>
