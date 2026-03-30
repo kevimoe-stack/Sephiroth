@@ -42,6 +42,22 @@ export interface Backtest {
   updated_at: string;
 }
 
+export interface BacktestTrade {
+  id: string;
+  backtest_id: string;
+  direction: string;
+  entry_date: string;
+  exit_date: string | null;
+  entry_price: number;
+  exit_price: number | null;
+  quantity: number;
+  pnl: number | null;
+  pnl_percent: number | null;
+  fees: number;
+  notes: string | null;
+  created_at: string;
+}
+
 export interface WalkforwardResult {
   id: string;
   strategy_id: string;

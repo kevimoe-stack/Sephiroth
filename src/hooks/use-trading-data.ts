@@ -5,11 +5,12 @@ import { hasSupabaseEnv, supabase } from "@/integrations/supabase/client";
 import { invokeBacktest, invokeWalkforward, type ResearchConfig } from "@/lib/research";
 import { invokePaperTrade, type PaperTradeRequest } from "@/lib/paper";
 import { invokeExecuteTrade, type ExecuteTradeRequest } from "@/lib/live";
-import type { AgentAllocation, AgentJobRun, AgentJobStep, AgentLifecycleEvent, AgentLifecycleRun, AgentMetaAllocationEntry, AgentMetaAllocationRun, AgentMonitorAlert, AgentMonitorRun, AgentRebalanceAction, AgentRebalanceRun, AgentRegimeRun, AgentRegimeSnapshot, AgentSchedulerConfig, AgentSchedulerRun, AgentTournamentEntry, AgentTournamentRun, Backtest, LiveOrder, LivePortfolio, PaperPortfolio, RiskRule, Strategy, WalkforwardResult } from "@/integrations/supabase/types";
+import type { AgentAllocation, AgentJobRun, AgentJobStep, AgentLifecycleEvent, AgentLifecycleRun, AgentMetaAllocationEntry, AgentMetaAllocationRun, AgentMonitorAlert, AgentMonitorRun, AgentRebalanceAction, AgentRebalanceRun, AgentRegimeRun, AgentRegimeSnapshot, AgentSchedulerConfig, AgentSchedulerRun, AgentTournamentEntry, AgentTournamentRun, Backtest, BacktestTrade, LiveOrder, LivePortfolio, PaperPortfolio, RiskRule, Strategy, WalkforwardResult } from "@/integrations/supabase/types";
 
 const keys = {
   strategies: ["strategies"] as const,
   backtests: ["backtests"] as const,
+  backtestTrades: ["backtest-trades"] as const,
   walkforward: ["walkforward"] as const,
   paper: ["paper-portfolios"] as const,
   risk: ["risk-rules"] as const,
@@ -51,6 +52,18 @@ async function fetchBacktests() {
   const { data, error } = await supabase.from("backtests").select("*").order("created_at", { ascending: false });
   if (error) throw error;
   return data as Backtest[];
+}
+
+async function fetchBacktestTrades(backtestId?: string | null) {
+  if (!backtestId) return [] as BacktestTrade[];
+  if (!hasSupabaseEnv || !supabase) return [] as BacktestTrade[];
+  const { data, error } = await supabase
+    .from("backtest_trades")
+    .select("*")
+    .eq("backtest_id", backtestId)
+    .order("entry_date", { ascending: false });
+  if (error) throw error;
+  return data as BacktestTrade[];
 }
 
 async function fetchWalkforwardResults() {
@@ -213,6 +226,14 @@ export function useStrategies() {
 
 export function useBacktests() {
   return useQuery({ queryKey: keys.backtests, queryFn: fetchBacktests });
+}
+
+export function useBacktestTrades(backtestId?: string | null) {
+  return useQuery({
+    queryKey: [...keys.backtestTrades, backtestId ?? "none"],
+    queryFn: () => fetchBacktestTrades(backtestId),
+    enabled: Boolean(backtestId),
+  });
 }
 
 export function useWalkforwardResults() {

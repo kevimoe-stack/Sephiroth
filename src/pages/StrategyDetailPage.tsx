@@ -10,6 +10,7 @@ import {
   useAgentAnalyze,
   useAgentCreateVariant,
   useAgentCreateVariantPack,
+  useBacktestTrades,
   useAgentOptimize,
   useBacktests,
   useRiskRules,
@@ -19,7 +20,7 @@ import {
   useWalkforwardResults,
 } from "@/hooks/use-trading-data";
 import { evaluateQualityGates } from "@/lib/quality-gates";
-import { formatNumber, formatPercent } from "@/lib/utils";
+import { formatCurrency, formatDateTime, formatNumber, formatPercent } from "@/lib/utils";
 
 function getLatestBacktest<T extends { created_at?: string }>(rows: T[]) {
   return [...rows].sort((left, right) => String(right.created_at ?? "").localeCompare(String(left.created_at ?? "")))[0] ?? null;
@@ -55,6 +56,7 @@ export default function StrategyDetailPage() {
   const strategy = strategies.find((item) => item.id === id);
   const strategyBacktests = backtests.filter((item) => item.strategy_id === id);
   const latestBacktest = getLatestBacktest(strategyBacktests);
+  const { data: latestBacktestTrades = [] } = useBacktestTrades(latestBacktest?.id);
   const wfRows = useMemo(() => walkforward.filter((item) => item.strategy_id === id), [id, walkforward]);
   const strategyRiskRule = useMemo(
     () => riskRules.find((rule) => rule.strategy_id === id) ?? riskRules.find((rule) => rule.is_global) ?? null,
@@ -62,6 +64,14 @@ export default function StrategyDetailPage() {
   );
   const qualityGate = useMemo(() => evaluateQualityGates(latestBacktest, wfRows, strategyRiskRule), [latestBacktest, strategyRiskRule, wfRows]);
   const isPilotStrategy = (strategy?.tags ?? []).includes("pilot");
+  const displayedBacktestMatchesInputs = useMemo(() => {
+    if (!latestBacktest) return false;
+    return (
+      latestBacktest.start_date === startDate &&
+      latestBacktest.end_date === endDate &&
+      Number(latestBacktest.initial_capital) === Number(initialCapital)
+    );
+  }, [endDate, initialCapital, latestBacktest, startDate]);
 
   if (!strategy) return <div>Strategie nicht gefunden.</div>;
 
@@ -421,6 +431,32 @@ export default function StrategyDetailPage() {
               </div>
             </div>
 
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+              <div className="rounded-xl border border-border/60 p-3">
+                <p className="text-xs uppercase tracking-wide text-slate-500">Angezeigter Run</p>
+                <p className="mt-1 text-sm font-medium">{formatDateTime(latestBacktest?.created_at)}</p>
+              </div>
+              <div className="rounded-xl border border-border/60 p-3">
+                <p className="text-xs uppercase tracking-wide text-slate-500">Final Capital</p>
+                <p className="mt-1 text-sm font-medium">{formatCurrency(latestBacktest?.final_capital)}</p>
+              </div>
+              <div className="rounded-xl border border-border/60 p-3">
+                <p className="text-xs uppercase tracking-wide text-slate-500">Profit Factor</p>
+                <p className="mt-1 text-sm font-medium">{formatNumber(latestBacktest?.profit_factor)}</p>
+              </div>
+              <div className="rounded-xl border border-border/60 p-3">
+                <p className="text-xs uppercase tracking-wide text-slate-500">Ø Haltedauer</p>
+                <p className="mt-1 text-sm font-medium">{latestBacktest?.avg_trade_duration ?? "-"}</p>
+              </div>
+            </div>
+
+            {!displayedBacktestMatchesInputs && latestBacktest && (
+              <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-700">
+                Angezeigt wird aktuell der letzte gespeicherte Backtest vom {formatDateTime(latestBacktest.created_at)}.
+                Er gehoert zu {latestBacktest.start_date} bis {latestBacktest.end_date} bei Kapital {formatCurrency(latestBacktest.initial_capital)} und passt damit nicht vollstaendig zu den aktuell eingestellten Eingaben oben.
+              </div>
+            )}
+
             <div className="h-[260px]">
               <ResponsiveContainer width="100%" height="100%">
                 <AreaChart data={latestBacktest?.equity_curve ?? []}>
@@ -431,6 +467,48 @@ export default function StrategyDetailPage() {
                   <Area type="monotone" dataKey="value" stroke="hsl(var(--primary))" fill="hsl(var(--primary) / 0.18)" />
                 </AreaChart>
               </ResponsiveContainer>
+            </div>
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-medium">Letzte Trades des angezeigten Backtests</p>
+                <p className="text-xs text-slate-500">
+                  {latestBacktestTrades.length > 0 ? `${latestBacktestTrades.length} gespeicherte Trades` : "Keine Trades gespeichert"}
+                </p>
+              </div>
+              {latestBacktestTrades.length > 0 ? (
+                <div className="overflow-x-auto rounded-xl border border-border/60">
+                  <table className="w-full text-sm">
+                    <thead className="bg-muted/60 text-left text-slate-500">
+                      <tr>
+                        <th className="px-3 py-2 font-medium">Entry</th>
+                        <th className="px-3 py-2 font-medium">Exit</th>
+                        <th className="px-3 py-2 font-medium">Entry Price</th>
+                        <th className="px-3 py-2 font-medium">Exit Price</th>
+                        <th className="px-3 py-2 font-medium">PnL</th>
+                        <th className="px-3 py-2 font-medium">PnL %</th>
+                        <th className="px-3 py-2 font-medium">Notiz</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {latestBacktestTrades.slice(0, 12).map((trade) => (
+                        <tr key={trade.id} className="border-t border-border/60">
+                          <td className="px-3 py-2">{formatDateTime(trade.entry_date)}</td>
+                          <td className="px-3 py-2">{formatDateTime(trade.exit_date)}</td>
+                          <td className="px-3 py-2">{formatNumber(trade.entry_price)}</td>
+                          <td className="px-3 py-2">{formatNumber(trade.exit_price)}</td>
+                          <td className="px-3 py-2">{formatCurrency(trade.pnl)}</td>
+                          <td className="px-3 py-2">{formatPercent(trade.pnl_percent)}</td>
+                          <td className="px-3 py-2 text-slate-500">{trade.notes ?? "-"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <div className="rounded-xl bg-muted p-4 text-sm text-slate-500">
+                  Fuer diesen Lauf sind noch keine einzelnen Trades sichtbar. Wenn die Kennzahlen unplausibel wirken, laesst sich damit der naechste Backtest deutlich besser prüfen.
+                </div>
+              )}
             </div>
             {backtestMutation.error && <p className="text-sm text-red-500">{String(backtestMutation.error.message)}</p>}
           </CardContent>
