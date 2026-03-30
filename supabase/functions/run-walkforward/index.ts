@@ -7,6 +7,19 @@ function removeQueueTags(tags: string[]) {
   return tags.filter((tag) => !["candidate-ready", "needs-improvement", "validation-pending", "preferred-for-tournament", "pack-winner", "retired-variant", "execution-watchlist"].includes(tag));
 }
 
+function stableStringify(value: unknown): string {
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => stableStringify(item)).join(",")}]`;
+  }
+  if (value && typeof value === "object") {
+    return `{${Object.entries(value as Record<string, unknown>)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, item]) => `${key}:${stableStringify(item)}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
 function getParentStrategyId(strategy: Record<string, unknown>) {
   const parameters = strategy.parameters;
   if (!parameters || typeof parameters !== "object" || Array.isArray(parameters)) return null;
@@ -77,6 +90,72 @@ Deno.serve(async (req) => {
     const feeRate = Number(body.feeRate ?? 0.001);
     const slippageRate = Number(body.slippageRate ?? 0.0005);
     const windows = Number(body.windows ?? 4);
+    const strategySnapshot = strategy.parameters ?? {};
+
+    const { data: existingRows, error: existingRowsError } = await supabase
+      .from("walkforward_results")
+      .select("*")
+      .eq("strategy_id", strategy.id)
+      .eq("run_start_date", startDate)
+      .eq("run_end_date", endDate)
+      .eq("initial_capital", initialCapital)
+      .eq("fee_rate", feeRate)
+      .eq("slippage_rate", slippageRate)
+      .eq("windows_requested", windows)
+      .order("created_at", { ascending: false });
+    if (existingRowsError) throw existingRowsError;
+
+    const compatibleRows = (existingRows ?? []).filter((row) =>
+      stableStringify(row.strategy_params_snapshot ?? {}) === stableStringify(strategySnapshot)
+    );
+    const groups = new Map<string, typeof compatibleRows>();
+    for (const row of compatibleRows) {
+      const key = row.run_group_id ?? `${row.created_at}-${row.window_number}`;
+      const current = groups.get(key) ?? [];
+      current.push(row);
+      groups.set(key, current);
+    }
+    const cachedRun = Array.from(groups.values())
+      .map((rows) => [...rows].sort((left, right) => Number(left.window_number ?? 0) - Number(right.window_number ?? 0)))
+      .find((rows) => rows.length >= windows);
+
+    if (cachedRun) {
+      const { data: backtests, error: backtestError } = await supabase
+        .from("backtests")
+        .select("*")
+        .eq("strategy_id", strategy.id)
+        .order("created_at", { ascending: false })
+        .limit(1);
+      if (backtestError) throw backtestError;
+
+      const { data: riskRules, error: riskError } = await supabase
+        .from("risk_rules")
+        .select("*")
+        .or(`strategy_id.eq.${strategy.id},is_global.eq.true`)
+        .order("updated_at", { ascending: false });
+      if (riskError) throw riskError;
+
+      const selectedRiskRule = (riskRules ?? []).find((rule) => rule.strategy_id === strategy.id) ?? (riskRules ?? []).find((rule) => rule.is_global) ?? null;
+      const qualityGate = evaluateQualityGates({
+        backtest: backtests?.[0] ?? null,
+        walkforward: cachedRun,
+        riskRule: selectedRiskRule,
+      });
+
+      return Response.json(
+        {
+          ok: true,
+          windows: cachedRun.length,
+          results: cachedRun,
+          qualityGate,
+          queueStatus: qualityGate.passed ? "candidate-ready" : "needs-improvement",
+          preferredVariantId: null,
+          cached: true,
+        },
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
+
     const runGroupId = crypto.randomUUID();
 
     const results = await runWalkForwardEngine(strategy, {
@@ -92,7 +171,6 @@ Deno.serve(async (req) => {
       throw new Error("Walk-forward produced no valid windows.");
     }
 
-    await supabase.from("walkforward_results").delete().eq("strategy_id", strategy.id);
     const rows = results.map((row) => ({
       strategy_id: strategy.id,
       run_group_id: runGroupId,
@@ -102,7 +180,7 @@ Deno.serve(async (req) => {
       fee_rate: feeRate,
       slippage_rate: slippageRate,
       windows_requested: windows,
-      strategy_params_snapshot: strategy.parameters ?? {},
+      strategy_params_snapshot: strategySnapshot,
       ...row,
     }));
     const { data, error } = await supabase.from("walkforward_results").insert(rows).select();
@@ -230,6 +308,7 @@ Deno.serve(async (req) => {
         qualityGate,
         queueStatus: queueTag,
         preferredVariantId,
+        cached: false,
       },
       { headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );

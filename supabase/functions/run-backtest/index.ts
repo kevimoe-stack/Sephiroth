@@ -6,6 +6,19 @@ function removeQueueTags(tags: string[]) {
   return tags.filter((tag) => !["candidate-ready", "needs-improvement", "validation-pending"].includes(tag));
 }
 
+function stableStringify(value: unknown): string {
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => stableStringify(item)).join(",")}]`;
+  }
+  if (value && typeof value === "object") {
+    return `{${Object.entries(value as Record<string, unknown>)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, item]) => `${key}:${stableStringify(item)}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -40,6 +53,42 @@ Deno.serve(async (req) => {
     const initialCapital = Number(body.initialCapital ?? 10000);
     const feeRate = Number(body.feeRate ?? 0.001);
     const slippageRate = Number(body.slippageRate ?? 0.0005);
+    const strategySnapshot = strategy.parameters ?? {};
+
+    const { data: existingBacktests, error: existingBacktestsError } = await supabase
+      .from("backtests")
+      .select("*")
+      .eq("strategy_id", strategy.id)
+      .eq("start_date", startDate)
+      .eq("end_date", endDate)
+      .eq("initial_capital", initialCapital)
+      .eq("fee_rate", feeRate)
+      .eq("slippage_rate", slippageRate)
+      .order("created_at", { ascending: false })
+      .limit(5);
+    if (existingBacktestsError) throw existingBacktestsError;
+
+    const cachedBacktest = (existingBacktests ?? []).find((item) =>
+      stableStringify(item.strategy_params_snapshot ?? {}) === stableStringify(strategySnapshot)
+    );
+
+    if (cachedBacktest) {
+      const { count: tradeCount, error: tradeCountError } = await supabase
+        .from("backtest_trades")
+        .select("*", { count: "exact", head: true })
+        .eq("backtest_id", cachedBacktest.id);
+      if (tradeCountError) throw tradeCountError;
+
+      return Response.json(
+        {
+          ok: true,
+          backtest: cachedBacktest,
+          tradesInserted: tradeCount ?? 0,
+          cached: true,
+        },
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
 
     const result = await runBacktestEngine(strategy, {
       startDate,
@@ -58,7 +107,7 @@ Deno.serve(async (req) => {
         initial_capital: initialCapital,
         fee_rate: feeRate,
         slippage_rate: slippageRate,
-        strategy_params_snapshot: strategy.parameters ?? {},
+        strategy_params_snapshot: strategySnapshot,
         final_capital: result.metrics.final_capital,
         total_return: result.metrics.total_return,
         cagr: result.metrics.cagr,
@@ -107,6 +156,7 @@ Deno.serve(async (req) => {
         ok: true,
         backtest: insertedBacktest,
         tradesInserted: result.trades.length,
+        cached: false,
       },
       { headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
