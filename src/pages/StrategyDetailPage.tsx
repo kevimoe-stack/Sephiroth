@@ -26,6 +26,21 @@ function getLatestBacktest<T extends { created_at?: string }>(rows: T[]) {
   return [...rows].sort((left, right) => String(right.created_at ?? "").localeCompare(String(left.created_at ?? "")))[0] ?? null;
 }
 
+function getLatestMatchingBacktest<T extends { created_at?: string; start_date?: string; end_date?: string; initial_capital?: number }>(
+  rows: T[],
+  startDate: string,
+  endDate: string,
+  initialCapital: number,
+) {
+  return [...rows]
+    .filter((row) =>
+      row.start_date === startDate &&
+      row.end_date === endDate &&
+      Number(row.initial_capital ?? 0) === Number(initialCapital)
+    )
+    .sort((left, right) => String(right.created_at ?? "").localeCompare(String(left.created_at ?? "")))[0] ?? null;
+}
+
 export default function StrategyDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -56,22 +71,24 @@ export default function StrategyDetailPage() {
   const strategy = strategies.find((item) => item.id === id);
   const strategyBacktests = backtests.filter((item) => item.strategy_id === id);
   const latestBacktest = getLatestBacktest(strategyBacktests);
-  const { data: latestBacktestTrades = [] } = useBacktestTrades(latestBacktest?.id);
+  const matchingBacktest = useMemo(
+    () => getLatestMatchingBacktest(strategyBacktests, startDate, endDate, initialCapital),
+    [endDate, initialCapital, startDate, strategyBacktests],
+  );
+  const displayedBacktest = matchingBacktest ?? latestBacktest;
+  const recentBacktests = useMemo(
+    () => [...strategyBacktests].sort((left, right) => String(right.created_at ?? "").localeCompare(String(left.created_at ?? ""))).slice(0, 5),
+    [strategyBacktests],
+  );
+  const { data: latestBacktestTrades = [] } = useBacktestTrades(displayedBacktest?.id);
   const wfRows = useMemo(() => walkforward.filter((item) => item.strategy_id === id), [id, walkforward]);
   const strategyRiskRule = useMemo(
     () => riskRules.find((rule) => rule.strategy_id === id) ?? riskRules.find((rule) => rule.is_global) ?? null,
     [id, riskRules],
   );
-  const qualityGate = useMemo(() => evaluateQualityGates(latestBacktest, wfRows, strategyRiskRule), [latestBacktest, strategyRiskRule, wfRows]);
+  const qualityGate = useMemo(() => evaluateQualityGates(displayedBacktest, wfRows, strategyRiskRule), [displayedBacktest, strategyRiskRule, wfRows]);
   const isPilotStrategy = (strategy?.tags ?? []).includes("pilot");
-  const displayedBacktestMatchesInputs = useMemo(() => {
-    if (!latestBacktest) return false;
-    return (
-      latestBacktest.start_date === startDate &&
-      latestBacktest.end_date === endDate &&
-      Number(latestBacktest.initial_capital) === Number(initialCapital)
-    );
-  }, [endDate, initialCapital, latestBacktest, startDate]);
+  const displayedBacktestMatchesInputs = Boolean(matchingBacktest);
 
   if (!strategy) return <div>Strategie nicht gefunden.</div>;
 
@@ -400,53 +417,76 @@ export default function StrategyDetailPage() {
               </div>
             </div>
 
+            {recentBacktests.length > 0 && (
+              <div className="space-y-3">
+                <p className="text-sm font-medium">Letzte gespeicherte Backtests</p>
+                <div className="flex flex-wrap gap-2">
+                  {recentBacktests.map((backtest) => (
+                    <Button
+                      key={backtest.id}
+                      type="button"
+                      variant={displayedBacktest?.id === backtest.id ? "secondary" : "outline"}
+                      size="sm"
+                      onClick={() => {
+                        setStartDate(backtest.start_date);
+                        setEndDate(backtest.end_date);
+                        setInitialCapital(Number(backtest.initial_capital));
+                      }}
+                    >
+                      {backtest.start_date} → {backtest.end_date}
+                    </Button>
+                  ))}
+                </div>
+              </div>
+            )}
+
             <div className="grid grid-cols-2 gap-3 md:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-7">
               <div className="min-h-24 rounded-xl bg-muted p-3">
                 <p className="text-xs uppercase tracking-wide text-slate-500">Return</p>
-                <p className="mt-1 text-2xl font-semibold">{formatPercent(latestBacktest?.total_return)}</p>
+                <p className="mt-1 text-2xl font-semibold">{formatPercent(displayedBacktest?.total_return)}</p>
               </div>
               <div className="min-h-24 rounded-xl bg-muted p-3">
                 <p className="text-xs uppercase tracking-wide text-slate-500">Sharpe</p>
-                <p className="mt-1 text-2xl font-semibold">{formatNumber(latestBacktest?.sharpe_ratio)}</p>
+                <p className="mt-1 text-2xl font-semibold">{formatNumber(displayedBacktest?.sharpe_ratio)}</p>
               </div>
               <div className="min-h-24 rounded-xl bg-muted p-3">
                 <p className="text-xs uppercase tracking-wide text-slate-500">Max DD</p>
-                <p className="mt-1 text-2xl font-semibold">{formatPercent(latestBacktest?.max_drawdown)}</p>
+                <p className="mt-1 text-2xl font-semibold">{formatPercent(displayedBacktest?.max_drawdown)}</p>
               </div>
               <div className="min-h-24 rounded-xl bg-muted p-3">
                 <p className="text-xs uppercase tracking-wide text-slate-500">Win Rate</p>
-                <p className="mt-1 text-2xl font-semibold">{formatPercent(latestBacktest?.win_rate)}</p>
+                <p className="mt-1 text-2xl font-semibold">{formatPercent(displayedBacktest?.win_rate)}</p>
               </div>
               <div className="min-h-24 rounded-xl bg-muted p-3">
                 <p className="text-xs uppercase tracking-wide text-slate-500">Trades</p>
-                <p className="mt-1 text-2xl font-semibold">{formatNumber(latestBacktest?.total_trades, 0)}</p>
+                <p className="mt-1 text-2xl font-semibold">{formatNumber(displayedBacktest?.total_trades, 0)}</p>
               </div>
               <div className="min-h-24 rounded-xl bg-muted p-3">
                 <p className="text-xs uppercase tracking-wide text-slate-500">Gewinner</p>
-                <p className="mt-1 text-2xl font-semibold">{formatNumber(latestBacktest?.winning_trades, 0)}</p>
+                <p className="mt-1 text-2xl font-semibold">{formatNumber(displayedBacktest?.winning_trades, 0)}</p>
               </div>
               <div className="min-h-24 rounded-xl bg-muted p-3">
                 <p className="text-xs uppercase tracking-wide text-slate-500">Verlierer</p>
-                <p className="mt-1 text-2xl font-semibold">{formatNumber(latestBacktest?.losing_trades, 0)}</p>
+                <p className="mt-1 text-2xl font-semibold">{formatNumber(displayedBacktest?.losing_trades, 0)}</p>
               </div>
             </div>
 
             <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
               <div className="min-h-24 rounded-xl border border-border/60 p-3">
                 <p className="text-xs uppercase tracking-wide text-slate-500">Angezeigter Run</p>
-                <p className="mt-1 text-sm font-medium">{formatDateTime(latestBacktest?.created_at)}</p>
+                <p className="mt-1 text-sm font-medium">{formatDateTime(displayedBacktest?.created_at)}</p>
               </div>
               <div className="min-h-24 rounded-xl border border-border/60 p-3">
                 <p className="text-xs uppercase tracking-wide text-slate-500">Final Capital</p>
-                <p className="mt-1 text-sm font-medium">{formatCurrency(latestBacktest?.final_capital)}</p>
+                <p className="mt-1 text-sm font-medium">{formatCurrency(displayedBacktest?.final_capital)}</p>
               </div>
               <div className="min-h-24 rounded-xl border border-border/60 p-3">
                 <p className="text-xs uppercase tracking-wide text-slate-500">Profit Factor</p>
-                <p className="mt-1 text-sm font-medium">{formatNumber(latestBacktest?.profit_factor)}</p>
+                <p className="mt-1 text-sm font-medium">{formatNumber(displayedBacktest?.profit_factor)}</p>
               </div>
               <div className="min-h-24 rounded-xl border border-border/60 p-3">
                 <p className="text-xs uppercase tracking-wide text-slate-500">Ø Haltedauer</p>
-                <p className="mt-1 text-sm font-medium">{latestBacktest?.avg_trade_duration ?? "-"}</p>
+                <p className="mt-1 text-sm font-medium">{displayedBacktest?.avg_trade_duration ?? "-"}</p>
               </div>
             </div>
 
@@ -459,7 +499,7 @@ export default function StrategyDetailPage() {
 
             <div className="h-[260px]">
               <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={latestBacktest?.equity_curve ?? []}>
+                <AreaChart data={displayedBacktest?.equity_curve ?? []}>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} />
                   <XAxis dataKey="date" />
                   <YAxis />

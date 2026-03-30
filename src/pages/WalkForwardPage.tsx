@@ -1,11 +1,15 @@
-import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+﻿import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useStrategies, useWalkforwardResults } from "@/hooks/use-trading-data";
+import { formatNumber } from "@/lib/utils";
 
 export default function WalkForwardPage() {
   const { data: results = [] } = useWalkforwardResults();
   const { data: strategies = [] } = useStrategies();
-  const rows = results.map((item) => ({ ...item, strategy: strategies.find((strategy) => strategy.id === item.strategy_id)?.name ?? item.strategy_id }));
+  const rows = results.map((item) => ({
+    ...item,
+    strategy: strategies.find((strategy) => strategy.id === item.strategy_id)?.name ?? item.strategy_id,
+  }));
 
   return (
     <div className="space-y-6">
@@ -31,7 +35,7 @@ export default function WalkForwardPage() {
             <CardContent className="space-y-2 text-sm text-slate-500">
               <p>IS: {row.in_sample_start} → {row.in_sample_end}</p>
               <p>OOS: {row.out_of_sample_start} → {row.out_of_sample_end}</p>
-              <p>Effizienz: {row.efficiency_ratio?.toFixed(2) ?? "–"}</p>
+              <p>Effizienz: {formatNumber(row.efficiency_ratio)}</p>
             </CardContent>
           </Card>
         ))}
