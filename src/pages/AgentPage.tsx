@@ -4,7 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useAgentAnalyze, useAgentBulkAnalyze, useAgentOptimize, useBacktests, useLiveOrders, useLivePortfolios, usePaperPortfolios, useRiskRules, useStrategies, useWalkforwardResults } from "@/hooks/use-trading-data";
-import { computeHealth } from "@/lib/analytics";
+import { computeHealth, getPilotComparison, getPilotRole } from "@/lib/analytics";
 import { evaluateQualityGates } from "@/lib/quality-gates";
 import { formatNumber } from "@/lib/utils";
 
@@ -27,6 +27,7 @@ export default function AgentPage() {
   const optimizeMutation = useAgentOptimize();
   const bulkMutation = useAgentBulkAnalyze();
   const [selectedStrategyId, setSelectedStrategyId] = useState("");
+  const [showComparisonQueue, setShowComparisonQueue] = useState(false);
 
   const healthRows = useMemo(
     () =>
@@ -36,7 +37,6 @@ export default function AgentPage() {
     [strategies, backtests, wf, paperPortfolios, livePortfolios, liveOrders],
   );
 
-  const selectedStrategy = strategies.find((strategy) => strategy.id === selectedStrategyId) ?? healthRows[0]?.strategy ?? null;
   const portfolioRows = bulkMutation.data?.ranking ?? healthRows.map((row) => ({
     strategy_id: row.strategy.id,
     strategy_name: row.strategy.name,
@@ -44,6 +44,13 @@ export default function AgentPage() {
     readiness_score: row.readinessScore,
     latest_sharpe: row.backtest?.sharpe_ratio ?? 0,
   }));
+
+  const pilotComparison = useMemo(
+    () => getPilotComparison(strategies, backtests, wf),
+    [strategies, backtests, wf],
+  );
+
+  const selectedStrategy = strategies.find((strategy) => strategy.id === selectedStrategyId) ?? pilotComparison.leader?.strategy ?? healthRows[0]?.strategy ?? null;
 
   const candidateRows = useMemo(() => {
     const rows = strategies
@@ -88,13 +95,27 @@ export default function AgentPage() {
       .map((row) => ({
         ...row,
         preferredForTournament: bestByParent.get(row.parentStrategyId) === row.strategy.id,
+        parentPilotRole: getPilotRole(row.parentStrategyId, pilotComparison),
       }))
       .sort((left, right) => {
-        const leftScore = left.executionWatchlist ? 5 : left.preferredForTournament ? 4 : left.queueStatus === "candidate-ready" ? 3 : left.queueStatus === "validation-pending" ? 2 : left.queueStatus === "awaiting-validation" ? 1 : 0;
-        const rightScore = right.executionWatchlist ? 5 : right.preferredForTournament ? 4 : right.queueStatus === "candidate-ready" ? 3 : right.queueStatus === "validation-pending" ? 2 : right.queueStatus === "awaiting-validation" ? 1 : 0;
+        const leftScore =
+          (left.executionWatchlist ? 5 : left.preferredForTournament ? 4 : left.queueStatus === "candidate-ready" ? 3 : left.queueStatus === "validation-pending" ? 2 : left.queueStatus === "awaiting-validation" ? 1 : 0) +
+          (left.parentPilotRole === "focus" ? 1 : left.parentPilotRole === "comparison" ? -2 : 0);
+        const rightScore =
+          (right.executionWatchlist ? 5 : right.preferredForTournament ? 4 : right.queueStatus === "candidate-ready" ? 3 : right.queueStatus === "validation-pending" ? 2 : right.queueStatus === "awaiting-validation" ? 1 : 0) +
+          (right.parentPilotRole === "focus" ? 1 : right.parentPilotRole === "comparison" ? -2 : 0);
+        if (rightScore !== leftScore) return rightScore - leftScore;
+        if ((right.latestBacktest?.sharpe_ratio ?? -999) !== (left.latestBacktest?.sharpe_ratio ?? -999)) {
+          return Number(right.latestBacktest?.sharpe_ratio ?? -999) - Number(left.latestBacktest?.sharpe_ratio ?? -999);
+        }
         return rightScore - leftScore;
       });
-  }, [strategies, backtests, wf, riskRules, paperPortfolios, livePortfolios, liveOrders]);
+  }, [strategies, backtests, wf, riskRules, paperPortfolios, livePortfolios, liveOrders, pilotComparison]);
+
+  const visibleCandidateRows = useMemo(
+    () => candidateRows.filter((row) => showComparisonQueue || row.parentPilotRole !== "comparison"),
+    [candidateRows, showComparisonQueue],
+  );
 
   return (
     <Tabs defaultValue="overview" className="space-y-4">
@@ -145,10 +166,25 @@ export default function AgentPage() {
       </TabsContent>
       <TabsContent value="queue">
         <Card>
-          <CardHeader><CardTitle>Candidate Queue</CardTitle></CardHeader>
+          <CardHeader className="space-y-3">
+            <CardTitle>Candidate Queue</CardTitle>
+            <div className="flex flex-wrap items-center gap-2 text-sm text-slate-500">
+              <span>{visibleCandidateRows.length} sichtbar</span>
+              <span>{candidateRows.filter((row) => row.parentPilotRole === "focus").length} Fokusspur</span>
+              <span>{candidateRows.filter((row) => row.parentPilotRole === "comparison").length} Vergleichsspur</span>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setShowComparisonQueue((current) => !current)}
+              >
+                {showComparisonQueue ? "Vergleichslinie ausblenden" : "Vergleichslinie anzeigen"}
+              </Button>
+            </div>
+          </CardHeader>
           <CardContent className="space-y-4 text-sm text-slate-500">
-            {candidateRows.length === 0 && <p>Noch keine Agent-Varianten in der Queue.</p>}
-            {candidateRows.map(({ strategy, gate, health, queueStatus, latestBacktest, preferredForTournament, executionWatchlist }) => (
+            {visibleCandidateRows.length === 0 && <p>Noch keine Agent-Varianten in der Queue.</p>}
+            {visibleCandidateRows.map(({ strategy, gate, health, queueStatus, latestBacktest, preferredForTournament, executionWatchlist, parentPilotRole }) => (
               <div key={strategy.id} className="rounded-xl bg-muted p-4">
                 <div className="flex items-center justify-between gap-3">
                   <div>
@@ -159,6 +195,8 @@ export default function AgentPage() {
                     <span className={queueStatus === "candidate-ready" ? "text-emerald-600" : queueStatus === "validation-pending" || queueStatus === "awaiting-validation" ? "text-amber-600" : queueStatus === "retired" ? "text-slate-500" : "text-red-500"}>
                       {queueStatus}
                     </span>
+                    {parentPilotRole === "focus" && <span className="text-indigo-600">pilot-focus-variant</span>}
+                    {parentPilotRole === "comparison" && <span className="text-slate-500">comparison-variant</span>}
                     {executionWatchlist && <span className="text-sky-600">execution-watchlist</span>}
                     {preferredForTournament && <span className="text-emerald-600">preferred-for-tournament</span>}
                   </div>
@@ -169,6 +207,11 @@ export default function AgentPage() {
                 {health.operationalNotes.length > 0 && (
                   <div className="mt-2 space-y-1">
                     {health.operationalNotes.map((note) => <p key={note}>{note}</p>)}
+                  </div>
+                )}
+                {parentPilotRole === "comparison" && (
+                  <div className="mt-2 space-y-1">
+                    <p>Diese Variante stammt aus der Vergleichslinie und bleibt nur als schlanke Referenzspur in der Queue.</p>
                   </div>
                 )}
                 {queueStatus === "retired" ? (

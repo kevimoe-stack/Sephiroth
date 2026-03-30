@@ -547,7 +547,7 @@ export default function StrategyDetailPage() {
             {recentBacktests.length > 0 && (
               <div className="space-y-3">
                 <p className="text-sm font-medium">Letzte gespeicherte Backtests</p>
-                <div className="grid gap-2 sm:grid-cols-2 2xl:grid-cols-3">
+                <div className="grid gap-2 md:grid-cols-2">
                   {recentBacktests.map((backtest) => (
                     <Button
                       key={backtest.id}
@@ -577,7 +577,7 @@ export default function StrategyDetailPage() {
               </div>
             )}
 
-            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            <div className="grid gap-3 md:grid-cols-2 3xl:grid-cols-3">
               <div className="min-h-28 rounded-xl bg-muted p-4">
                 <p className="text-xs uppercase tracking-wide text-slate-500">Return</p>
                 <p className="mt-2 text-2xl font-semibold leading-tight tracking-tight 2xl:text-3xl">{formatPercent(displayedBacktest?.total_return)}</p>
@@ -602,13 +602,13 @@ export default function StrategyDetailPage() {
                 <p className="text-xs uppercase tracking-wide text-slate-500">Gewinner</p>
                 <p className="mt-2 text-2xl font-semibold leading-tight tracking-tight 2xl:text-3xl">{formatNumber(displayedBacktest?.winning_trades, 0)}</p>
               </div>
-              <div className="min-h-28 rounded-xl bg-muted p-4 sm:col-span-2 xl:col-span-1">
+              <div className="min-h-28 rounded-xl bg-muted p-4 md:col-span-2 3xl:col-span-1">
                 <p className="text-xs uppercase tracking-wide text-slate-500">Verlierer</p>
                 <p className="mt-2 text-2xl font-semibold leading-tight tracking-tight 2xl:text-3xl">{formatNumber(displayedBacktest?.losing_trades, 0)}</p>
               </div>
             </div>
 
-            <div className="grid gap-3 md:grid-cols-2 2xl:grid-cols-4">
+            <div className="grid gap-3 md:grid-cols-2">
               <div className="min-h-24 rounded-xl border border-border/60 p-4">
                 <p className="text-xs uppercase tracking-wide text-slate-500">Angezeigter Run</p>
                 <p className="mt-1 text-sm font-medium">{formatDateTime(displayedBacktest?.created_at)}</p>
