@@ -177,6 +177,7 @@ export default function StrategyDetailPage() {
     return current ? { ...comparison, current } : null;
   }, [backtests, isPilotStrategy, strategies, strategy, walkforward]);
   const pilotRole = getPilotRole(strategy?.id ?? "", pilotComparison);
+  const comparisonPilotLimited = pilotRole === "comparison";
 
   if (!strategy) return <div>Strategie nicht gefunden.</div>;
 
@@ -342,11 +343,11 @@ export default function StrategyDetailPage() {
               <Button variant="secondary" onClick={() => void handleCreateVariant(true)} disabled={busy}>
                 {createVariantMutation.isPending || validatingVariantId ? "Erzeuge und validiere..." : "Variante + Validierung"}
               </Button>
-              <Button variant="outline" onClick={() => void handleCreateVariantPack(false)} disabled={busy}>
-                {createVariantPackMutation.isPending ? "Erzeuge Pack..." : "Varianten-Pack"}
+              <Button variant="outline" onClick={() => void handleCreateVariantPack(false)} disabled={busy || comparisonPilotLimited}>
+                {createVariantPackMutation.isPending ? "Erzeuge Pack..." : comparisonPilotLimited ? "Varianten-Pack pausiert" : "Varianten-Pack"}
               </Button>
-              <Button variant="secondary" onClick={() => void handleCreateVariantPack(true)} disabled={busy}>
-                {createVariantPackMutation.isPending || packValidationRunning ? "Pack wird validiert..." : "Pack + Validierung"}
+              <Button variant="secondary" onClick={() => void handleCreateVariantPack(true)} disabled={busy || comparisonPilotLimited}>
+                {createVariantPackMutation.isPending || packValidationRunning ? "Pack wird validiert..." : comparisonPilotLimited ? "Pack + Validierung pausiert" : "Pack + Validierung"}
               </Button>
             </div>
           </div>
@@ -375,6 +376,11 @@ export default function StrategyDetailPage() {
               {pilotRole === "comparison" && (
                 <p className="mt-3 text-slate-600">
                   Diese Linie bleibt als Vergleich aktiv, wird aber derzeit bewusst hinter der Fokusspur eingeordnet, bis sich die Research-Lage veraendert.
+                </p>
+              )}
+              {comparisonPilotLimited && (
+                <p className="mt-3 text-slate-600">
+                  Um Kosten und Run-Last niedrig zu halten, ist fuer die Vergleichslinie das Varianten-Pack aktuell pausiert. Einzelne manuelle Varianten bleiben moeglich.
                 </p>
               )}
               {pilotComparison.leader && pilotComparison.leader.strategy.id !== strategy.id && (
