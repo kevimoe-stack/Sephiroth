@@ -9,14 +9,17 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { useCreateStrategy, useStrategies } from "@/hooks/use-trading-data";
-import { buildPilotStrategySeed } from "@/lib/strategy-presets";
+import { buildPilotStrategySeeds } from "@/lib/strategy-presets";
 
 export default function StrategiesPage() {
   const { data: strategies = [] } = useStrategies();
   const createStrategy = useCreateStrategy();
   const [query, setQuery] = useState("");
   const [showVariants, setShowVariants] = useState(false);
-  const pilotExists = strategies.some((strategy) => (strategy.tags ?? []).includes("pilot"));
+  const pilotNames = new Set(
+    strategies.filter((strategy) => (strategy.tags ?? []).includes("pilot")).map((strategy) => strategy.name),
+  );
+  const missingPilotSeeds = buildPilotStrategySeeds().filter((seed) => !pilotNames.has(String(seed.name ?? "")));
   const filtered = useMemo(
     () =>
       strategies.filter((strategy) => {
@@ -37,15 +40,17 @@ export default function StrategiesPage() {
   );
 
   const handleCreatePilot = async () => {
-    if (pilotExists) {
-      toast.message("Pilotstrategie existiert bereits in der Liste.");
+    if (missingPilotSeeds.length === 0) {
+      toast.message("Pilotstrategien existieren bereits in der Liste.");
       return;
     }
     try {
-      const created = await createStrategy.mutateAsync(buildPilotStrategySeed());
-      toast.success(`Pilotstrategie angelegt: ${created.name ?? "Pilot"}`);
+      for (const seed of missingPilotSeeds) {
+        await createStrategy.mutateAsync(seed);
+      }
+      toast.success(`${missingPilotSeeds.length} Pilotstrategie(n) angelegt.`);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Pilotstrategie konnte nicht angelegt werden.");
+      toast.error(error instanceof Error ? error.message : "Pilotstrategien konnten nicht angelegt werden.");
     }
   };
 
@@ -60,8 +65,8 @@ export default function StrategiesPage() {
           <Button variant="outline" onClick={() => setShowVariants((current) => !current)}>
             {showVariants ? "Varianten ausblenden" : "Varianten einblenden"}
           </Button>
-          <Button variant="secondary" onClick={() => void handleCreatePilot()} disabled={createStrategy.isPending || pilotExists}>
-            {createStrategy.isPending ? "Lege Pilot an..." : pilotExists ? "Pilot vorhanden" : "Pilotstrategie anlegen"}
+          <Button variant="secondary" onClick={() => void handleCreatePilot()} disabled={createStrategy.isPending || missingPilotSeeds.length === 0}>
+            {createStrategy.isPending ? "Lege Pilot an..." : missingPilotSeeds.length === 0 ? "Pilot-Pack vorhanden" : `Pilot-Pack anlegen (${missingPilotSeeds.length})`}
           </Button>
           <CreateStrategyDialog />
         </div>
