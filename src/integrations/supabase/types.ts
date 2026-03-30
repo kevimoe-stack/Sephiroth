@@ -64,6 +64,14 @@ export interface BacktestTrade {
 export interface WalkforwardResult {
   id: string;
   strategy_id: string;
+  run_group_id: string | null;
+  run_start_date: string | null;
+  run_end_date: string | null;
+  initial_capital: number | null;
+  fee_rate: number | null;
+  slippage_rate: number | null;
+  windows_requested: number | null;
+  strategy_params_snapshot: Record<string, Json> | null;
   window_number: number;
   in_sample_start: string;
   in_sample_end: string;

@@ -77,6 +77,7 @@ Deno.serve(async (req) => {
     const feeRate = Number(body.feeRate ?? 0.001);
     const slippageRate = Number(body.slippageRate ?? 0.0005);
     const windows = Number(body.windows ?? 4);
+    const runGroupId = crypto.randomUUID();
 
     const results = await runWalkForwardEngine(strategy, {
       startDate,
@@ -94,6 +95,14 @@ Deno.serve(async (req) => {
     await supabase.from("walkforward_results").delete().eq("strategy_id", strategy.id);
     const rows = results.map((row) => ({
       strategy_id: strategy.id,
+      run_group_id: runGroupId,
+      run_start_date: startDate,
+      run_end_date: endDate,
+      initial_capital: initialCapital,
+      fee_rate: feeRate,
+      slippage_rate: slippageRate,
+      windows_requested: windows,
+      strategy_params_snapshot: strategy.parameters ?? {},
       ...row,
     }));
     const { data, error } = await supabase.from("walkforward_results").insert(rows).select();

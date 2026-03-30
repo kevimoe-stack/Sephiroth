@@ -1,29 +1,66 @@
 ﻿import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useStrategies, useWalkforwardResults } from "@/hooks/use-trading-data";
-import { formatNumber } from "@/lib/utils";
+import type { WalkforwardResult } from "@/integrations/supabase/types";
+import { formatDateTime, formatNumber } from "@/lib/utils";
+
+function groupRuns(rows: WalkforwardResult[]) {
+  const groups = new Map<string, WalkforwardResult[]>();
+  for (const row of rows) {
+    const key = row.run_group_id ?? `${row.strategy_id}-${row.created_at}`;
+    const existing = groups.get(key) ?? [];
+    existing.push(row);
+    groups.set(key, existing);
+  }
+
+  return Array.from(groups.entries())
+    .map(([key, runRows]) => {
+      const sorted = [...runRows].sort((left, right) => left.window_number - right.window_number);
+      return {
+        id: key,
+        strategy_id: sorted[0]?.strategy_id ?? "",
+        created_at: sorted[0]?.created_at ?? "",
+        run_start_date: sorted[0]?.run_start_date ?? sorted[0]?.in_sample_start ?? "",
+        run_end_date: sorted[0]?.run_end_date ?? sorted[sorted.length - 1]?.out_of_sample_end ?? "",
+        windows_requested: sorted[0]?.windows_requested ?? sorted.length,
+        fee_rate: sorted[0]?.fee_rate ?? null,
+        slippage_rate: sorted[0]?.slippage_rate ?? null,
+        avg_efficiency:
+          sorted.length === 0
+            ? 0
+            : sorted.reduce((sum, row) => sum + Number(row.efficiency_ratio ?? 0), 0) / sorted.length,
+        passed_ratio:
+          sorted.length === 0
+            ? 0
+            : sorted.filter((row) => Boolean(row.passed)).length / sorted.length,
+      };
+    })
+    .sort((left, right) => String(right.created_at).localeCompare(String(left.created_at)));
+}
 
 export default function WalkForwardPage() {
   const { data: results = [] } = useWalkforwardResults();
   const { data: strategies = [] } = useStrategies();
-  const rows = results.map((item) => ({
-    ...item,
-    strategy: strategies.find((strategy) => strategy.id === item.strategy_id)?.name ?? item.strategy_id,
+  const rows = groupRuns(results).map((run) => ({
+    ...run,
+    strategy: strategies.find((strategy) => strategy.id === run.strategy_id)?.name ?? run.strategy_id,
   }));
 
   return (
     <div className="space-y-6">
       <Card>
-        <CardHeader><CardTitle>IS vs OOS Sharpe</CardTitle></CardHeader>
+        <CardHeader>
+          <CardTitle>Walk-Forward Runs</CardTitle>
+        </CardHeader>
         <CardContent className="h-[340px]">
           <ResponsiveContainer width="100%" height="100%">
             <BarChart data={rows}>
               <CartesianGrid strokeDasharray="3 3" vertical={false} />
-              <XAxis dataKey="window_number" />
+              <XAxis dataKey="strategy" hide />
               <YAxis />
               <Tooltip />
-              <Bar dataKey="in_sample_sharpe" fill="hsl(var(--chart-1))" />
-              <Bar dataKey="out_of_sample_sharpe" fill="hsl(var(--chart-2))" />
+              <Bar dataKey="avg_efficiency" fill="hsl(var(--chart-1))" />
+              <Bar dataKey="passed_ratio" fill="hsl(var(--chart-2))" />
             </BarChart>
           </ResponsiveContainer>
         </CardContent>
@@ -31,11 +68,17 @@ export default function WalkForwardPage() {
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {rows.map((row) => (
           <Card key={row.id}>
-            <CardHeader><CardTitle>{row.strategy} · Fenster {row.window_number}</CardTitle></CardHeader>
+            <CardHeader>
+              <CardTitle>{row.strategy}</CardTitle>
+            </CardHeader>
             <CardContent className="space-y-2 text-sm text-slate-500">
-              <p>IS: {row.in_sample_start} → {row.in_sample_end}</p>
-              <p>OOS: {row.out_of_sample_start} → {row.out_of_sample_end}</p>
-              <p>Effizienz: {formatNumber(row.efficiency_ratio)}</p>
+              <p>Run: {formatDateTime(row.created_at)}</p>
+              <p>Zeitraum: {row.run_start_date} → {row.run_end_date}</p>
+              <p>Fenster: {row.windows_requested}</p>
+              <p>Passrate: {formatNumber(row.passed_ratio * 100, 0)}%</p>
+              <p>Ø Effizienz: {formatNumber(row.avg_efficiency)}</p>
+              {(row.fee_rate ?? null) !== null && <p>Fee: {formatNumber(row.fee_rate, 4)}</p>}
+              {(row.slippage_rate ?? null) !== null && <p>Slippage: {formatNumber(row.slippage_rate, 4)}</p>}
             </CardContent>
           </Card>
         ))}

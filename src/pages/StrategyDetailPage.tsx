@@ -19,6 +19,7 @@ import {
   useStrategies,
   useWalkforwardResults,
 } from "@/hooks/use-trading-data";
+import type { WalkforwardResult } from "@/integrations/supabase/types";
 import { evaluateQualityGates } from "@/lib/quality-gates";
 import { formatCurrency, formatDateTime, formatNumber, formatPercent } from "@/lib/utils";
 
@@ -56,6 +57,30 @@ function stableStringify(value: unknown): string {
       .join(",")}}`;
   }
   return JSON.stringify(value);
+}
+
+function groupWalkforwardRuns(rows: WalkforwardResult[]) {
+  const groups = new Map<string, WalkforwardResult[]>();
+  for (const row of rows) {
+    const key = row.run_group_id ?? `${row.created_at ?? ""}-${row.run_start_date ?? ""}-${row.windows_requested ?? ""}`;
+    const existing = groups.get(key) ?? [];
+    existing.push(row);
+    groups.set(key, existing);
+  }
+  return Array.from(groups.entries())
+    .map(([runGroupId, runRows]) => ({
+      runGroupId,
+      rows: [...runRows].sort((left, right) => Number(left.window_number ?? 0) - Number(right.window_number ?? 0)),
+      createdAt: [...runRows].sort((left, right) => String(right.created_at ?? "").localeCompare(String(left.created_at ?? "")))[0]?.created_at ?? null,
+      runStartDate: runRows[0]?.run_start_date ?? null,
+      runEndDate: runRows[0]?.run_end_date ?? null,
+      initialCapital: runRows[0]?.initial_capital ?? null,
+      feeRate: runRows[0]?.fee_rate ?? null,
+      slippageRate: runRows[0]?.slippage_rate ?? null,
+      windowsRequested: runRows[0]?.windows_requested ?? null,
+      strategyParamsSnapshot: runRows[0]?.strategy_params_snapshot ?? null,
+    }))
+    .sort((left, right) => String(right.createdAt ?? "").localeCompare(String(left.createdAt ?? "")));
 }
 
 export default function StrategyDetailPage() {
@@ -112,7 +137,22 @@ export default function StrategyDetailPage() {
       .slice(0, 6);
   }, [strategyBacktests]);
   const { data: latestBacktestTrades = [] } = useBacktestTrades(displayedBacktest?.id);
-  const wfRows = useMemo(() => walkforward.filter((item) => item.strategy_id === id), [id, walkforward]);
+  const strategyWalkforwardRows = useMemo(() => walkforward.filter((item) => item.strategy_id === id), [id, walkforward]);
+  const walkforwardRuns = useMemo(() => groupWalkforwardRuns(strategyWalkforwardRows), [strategyWalkforwardRows]);
+  const matchingWalkforwardRun = useMemo(
+    () =>
+      walkforwardRuns.find((run) =>
+        run.runStartDate === startDate &&
+        run.runEndDate === endDate &&
+        Number(run.initialCapital ?? 0) === Number(initialCapital) &&
+        Number(run.feeRate ?? feeRate) === Number(feeRate) &&
+        Number(run.slippageRate ?? slippageRate) === Number(slippageRate) &&
+        Number(run.windowsRequested ?? windows) === Number(windows),
+      ) ?? null,
+    [endDate, feeRate, initialCapital, slippageRate, startDate, walkforwardRuns, windows],
+  );
+  const displayedWalkforwardRun = matchingWalkforwardRun ?? walkforwardRuns[0] ?? null;
+  const wfRows = displayedWalkforwardRun?.rows ?? [];
   const strategyRiskRule = useMemo(
     () => riskRules.find((rule) => rule.strategy_id === id) ?? riskRules.find((rule) => rule.is_global) ?? null,
     [id, riskRules],
@@ -120,10 +160,15 @@ export default function StrategyDetailPage() {
   const qualityGate = useMemo(() => evaluateQualityGates(displayedBacktest, wfRows, strategyRiskRule), [displayedBacktest, strategyRiskRule, wfRows]);
   const isPilotStrategy = (strategy?.tags ?? []).includes("pilot");
   const displayedBacktestMatchesInputs = Boolean(matchingBacktest);
+  const displayedWalkforwardMatchesInputs = Boolean(matchingWalkforwardRun);
   const displayedBacktestMatchesStrategy = useMemo(() => {
     if (!displayedBacktest?.strategy_params_snapshot) return true;
     return stableStringify(displayedBacktest.strategy_params_snapshot) === stableStringify(strategy?.parameters ?? {});
   }, [displayedBacktest?.strategy_params_snapshot, strategy?.parameters]);
+  const displayedWalkforwardMatchesStrategy = useMemo(() => {
+    if (!displayedWalkforwardRun?.strategyParamsSnapshot) return true;
+    return stableStringify(displayedWalkforwardRun.strategyParamsSnapshot) === stableStringify(strategy?.parameters ?? {});
+  }, [displayedWalkforwardRun?.strategyParamsSnapshot, strategy?.parameters]);
 
   if (!strategy) return <div>Strategie nicht gefunden.</div>;
 
@@ -662,6 +707,17 @@ export default function StrategyDetailPage() {
               ))}
             </div>
             {walkforwardMutation.error && <p className="text-sm text-red-500">{String(walkforwardMutation.error.message)}</p>}
+            {!displayedWalkforwardMatchesInputs && displayedWalkforwardRun && (
+              <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-700">
+                Angezeigt wird aktuell der letzte gespeicherte Walk-Forward-Lauf vom {formatDateTime(displayedWalkforwardRun.createdAt)}.
+                Er gehoert zu {displayedWalkforwardRun.runStartDate} bis {displayedWalkforwardRun.runEndDate} mit {displayedWalkforwardRun.windowsRequested ?? "-"} Fenstern und passt damit nicht vollstaendig zu den aktuell eingestellten Eingaben oben.
+              </div>
+            )}
+            {displayedWalkforwardRun && !displayedWalkforwardMatchesStrategy && (
+              <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-700">
+                Der angezeigte Walk-Forward-Lauf wurde mit einem aelteren Strategie-Parameterstand gespeichert. Fuer einen fairen Vergleich solltest du den Walk-Forward-Lauf mit dem aktuellen Strategiestand neu starten.
+              </div>
+            )}
           </CardContent>
         </Card>
       </div>
