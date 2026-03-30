@@ -1,20 +1,47 @@
-﻿import { Search } from "lucide-react";
+import { Search } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
+import { toast } from "sonner";
 import { BulkOperationsDialog } from "@/components/strategies/BulkOperationsDialog";
 import { CreateStrategyDialog } from "@/components/strategies/CreateStrategyDialog";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { useStrategies } from "@/hooks/use-trading-data";
+import { useCreateStrategy, useStrategies } from "@/hooks/use-trading-data";
+import { buildPilotStrategySeed } from "@/lib/strategy-presets";
 
 export default function StrategiesPage() {
   const { data: strategies = [] } = useStrategies();
+  const createStrategy = useCreateStrategy();
   const [query, setQuery] = useState("");
+  const pilotExists = strategies.some((strategy) => (strategy.tags ?? []).includes("pilot"));
   const filtered = useMemo(
     () => strategies.filter((strategy) => [strategy.name, strategy.symbol, ...(strategy.tags ?? [])].join(" ").toLowerCase().includes(query.toLowerCase())),
     [query, strategies],
   );
+  const summary = useMemo(
+    () => ({
+      total: strategies.length,
+      pilots: strategies.filter((strategy) => (strategy.tags ?? []).includes("pilot")).length,
+      champions: strategies.filter((strategy) => strategy.is_champion).length,
+      variants: strategies.filter((strategy) => (strategy.tags ?? []).includes("agent-variant")).length,
+    }),
+    [strategies],
+  );
+
+  const handleCreatePilot = async () => {
+    if (pilotExists) {
+      toast.message("Pilotstrategie existiert bereits in der Liste.");
+      return;
+    }
+    try {
+      const created = await createStrategy.mutateAsync(buildPilotStrategySeed());
+      toast.success(`Pilotstrategie angelegt: ${created.name ?? "Pilot"}`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Pilotstrategie konnte nicht angelegt werden.");
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -24,8 +51,30 @@ export default function StrategiesPage() {
           <Input className="pl-10" placeholder="Strategien durchsuchen" value={query} onChange={(e) => setQuery(e.target.value)} />
         </div>
         <div className="flex flex-wrap gap-3">
+          <Button variant="secondary" onClick={() => void handleCreatePilot()} disabled={createStrategy.isPending || pilotExists}>
+            {createStrategy.isPending ? "Lege Pilot an..." : pilotExists ? "Pilot vorhanden" : "Pilotstrategie anlegen"}
+          </Button>
           <CreateStrategyDialog />
         </div>
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <Card>
+          <CardHeader><CardTitle>Strategien</CardTitle></CardHeader>
+          <CardContent><p className="text-3xl font-semibold">{summary.total}</p></CardContent>
+        </Card>
+        <Card>
+          <CardHeader><CardTitle>Pilot Seeds</CardTitle></CardHeader>
+          <CardContent><p className="text-3xl font-semibold">{summary.pilots}</p></CardContent>
+        </Card>
+        <Card>
+          <CardHeader><CardTitle>Champions</CardTitle></CardHeader>
+          <CardContent><p className="text-3xl font-semibold">{summary.champions}</p></CardContent>
+        </Card>
+        <Card>
+          <CardHeader><CardTitle>Agent-Varianten</CardTitle></CardHeader>
+          <CardContent><p className="text-3xl font-semibold">{summary.variants}</p></CardContent>
+        </Card>
       </div>
 
       <BulkOperationsDialog />
@@ -40,14 +89,17 @@ export default function StrategiesPage() {
                     <CardTitle>{strategy.name}</CardTitle>
                     <p className="mt-1 text-sm text-slate-500">{strategy.symbol} | {strategy.timeframe}</p>
                   </div>
-                  {strategy.is_champion && <Badge variant="success">Champion</Badge>}
+                  <div className="flex flex-wrap gap-2">
+                    {strategy.is_champion && <Badge variant="success">Champion</Badge>}
+                    {(strategy.tags ?? []).includes("pilot") && <Badge variant="secondary">Pilot</Badge>}
+                  </div>
                 </div>
               </CardHeader>
               <CardContent className="space-y-4 text-sm text-slate-500">
                 <p>{strategy.description}</p>
                 <div className="flex flex-wrap gap-2">
                   <Badge variant="secondary">{strategy.status}</Badge>
-                  {(strategy.tags ?? []).map((tag) => <Badge key={tag} variant="outline">{tag}</Badge>)}
+                  {(strategy.tags ?? []).slice(0, 8).map((tag) => <Badge key={tag} variant="outline">{tag}</Badge>)}
                 </div>
               </CardContent>
             </Card>

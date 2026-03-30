@@ -35,8 +35,13 @@ const keys = {
 };
 
 async function fetchStrategies() {
-  if (!hasSupabaseEnv || !supabase) return mockStrategies.filter((s) => s.status !== "eliminated");
-  const { data, error } = await supabase.from("strategies").select("*").neq("status", "eliminated").order("created_at", { ascending: false });
+  if (!hasSupabaseEnv || !supabase) return mockStrategies.filter((s) => !["eliminated", "archived"].includes(s.status));
+  const { data, error } = await supabase
+    .from("strategies")
+    .select("*")
+    .neq("status", "eliminated")
+    .neq("status", "archived")
+    .order("created_at", { ascending: false });
   if (error) throw error;
   return data as Strategy[];
 }
