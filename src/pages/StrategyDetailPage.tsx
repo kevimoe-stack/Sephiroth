@@ -61,8 +61,41 @@ export default function StrategyDetailPage() {
     [id, riskRules],
   );
   const qualityGate = useMemo(() => evaluateQualityGates(latestBacktest, wfRows, strategyRiskRule), [latestBacktest, strategyRiskRule, wfRows]);
+  const isPilotStrategy = (strategy?.tags ?? []).includes("pilot");
 
   if (!strategy) return <div>Strategie nicht gefunden.</div>;
+
+  const runPilotBaseline = async () => {
+    setStartDate("2019-01-01");
+    setEndDate(new Date().toISOString().slice(0, 10));
+    setInitialCapital(10000);
+    setFeeRate(0.001);
+    setSlippageRate(0.0005);
+    setWindows(6);
+
+    try {
+      await backtestMutation.mutateAsync({
+        strategyId: strategy.id,
+        startDate: "2019-01-01",
+        endDate: new Date().toISOString().slice(0, 10),
+        initialCapital: 10000,
+        feeRate: 0.001,
+        slippageRate: 0.0005,
+      });
+      await walkforwardMutation.mutateAsync({
+        strategyId: strategy.id,
+        startDate: "2019-01-01",
+        endDate: new Date().toISOString().slice(0, 10),
+        initialCapital: 10000,
+        feeRate: 0.001,
+        slippageRate: 0.0005,
+        windows: 6,
+      });
+      toast.success("Pilot-Basisvalidierung abgeschlossen.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Pilot-Basisvalidierung fehlgeschlagen.");
+    }
+  };
 
   const runValidationForStrategy = async (strategyId: string) => {
     setValidatingVariantId(strategyId);
@@ -168,6 +201,7 @@ export default function StrategyDetailPage() {
                 <CardTitle>{strategy.name}</CardTitle>
                 <Badge variant="secondary">{strategy.status}</Badge>
                 {strategy.is_champion && <Badge variant="success">Champion</Badge>}
+                {isPilotStrategy && <Badge variant="secondary">Pilot</Badge>}
                 <Badge variant={qualityGate.passed ? "success" : "warning"}>{qualityGate.passed ? "Research-ready" : "Gate blockiert"}</Badge>
                 {(strategy.tags ?? []).includes("optimizer-paused") && <Badge variant="warning">Optimizer pausiert</Badge>}
               </div>
@@ -177,6 +211,11 @@ export default function StrategyDetailPage() {
               <Button variant="outline" onClick={() => void handleAnalyze()} disabled={analyzeMutation.isPending || busy}>
                 {analyzeMutation.isPending ? "Analysiere..." : "Agent analysieren"}
               </Button>
+              {isPilotStrategy && (
+                <Button variant="secondary" onClick={() => void runPilotBaseline()} disabled={busy}>
+                  {backtestMutation.isPending || walkforwardMutation.isPending ? "Pilot wird validiert..." : "Pilot-Basisvalidierung"}
+                </Button>
+              )}
               <Button variant="outline" onClick={() => void handleOptimize()} disabled={optimizeMutation.isPending || busy}>
                 {optimizeMutation.isPending ? "Optimiere..." : "Optimierung ableiten"}
               </Button>
@@ -240,6 +279,11 @@ export default function StrategyDetailPage() {
             <CardTitle>Quality Gate</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4 text-sm">
+            {isPilotStrategy && (
+              <div className="rounded-xl border border-primary/20 bg-primary/5 p-4 text-slate-600">
+                Diese Pilotstrategie ist als sauberer Referenzkandidat gedacht: 4h, laengerer Testzeitraum und mehr Walk-Forward-Fenster statt aggressiver 1h-Optimierung.
+              </div>
+            )}
             <div className="rounded-xl bg-muted p-4">
               <p className="font-medium">Status {qualityGate.passed ? "freigegeben" : "blockiert"}</p>
               <p className="mt-2 text-slate-500">

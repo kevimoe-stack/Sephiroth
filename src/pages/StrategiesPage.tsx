@@ -15,10 +15,16 @@ export default function StrategiesPage() {
   const { data: strategies = [] } = useStrategies();
   const createStrategy = useCreateStrategy();
   const [query, setQuery] = useState("");
+  const [showVariants, setShowVariants] = useState(false);
   const pilotExists = strategies.some((strategy) => (strategy.tags ?? []).includes("pilot"));
   const filtered = useMemo(
-    () => strategies.filter((strategy) => [strategy.name, strategy.symbol, ...(strategy.tags ?? [])].join(" ").toLowerCase().includes(query.toLowerCase())),
-    [query, strategies],
+    () =>
+      strategies.filter((strategy) => {
+        const matchesQuery = [strategy.name, strategy.symbol, ...(strategy.tags ?? [])].join(" ").toLowerCase().includes(query.toLowerCase());
+        const isVariant = (strategy.tags ?? []).includes("agent-variant");
+        return matchesQuery && (showVariants || !isVariant);
+      }),
+    [query, showVariants, strategies],
   );
   const summary = useMemo(
     () => ({
@@ -51,6 +57,9 @@ export default function StrategiesPage() {
           <Input className="pl-10" placeholder="Strategien durchsuchen" value={query} onChange={(e) => setQuery(e.target.value)} />
         </div>
         <div className="flex flex-wrap gap-3">
+          <Button variant="outline" onClick={() => setShowVariants((current) => !current)}>
+            {showVariants ? "Varianten ausblenden" : "Varianten einblenden"}
+          </Button>
           <Button variant="secondary" onClick={() => void handleCreatePilot()} disabled={createStrategy.isPending || pilotExists}>
             {createStrategy.isPending ? "Lege Pilot an..." : pilotExists ? "Pilot vorhanden" : "Pilotstrategie anlegen"}
           </Button>
