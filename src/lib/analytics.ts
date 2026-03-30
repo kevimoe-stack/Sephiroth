@@ -8,6 +8,117 @@ export function getWalkforwardRows(rows: WalkforwardResult[], strategyId: string
   return rows.filter((item) => item.strategy_id === strategyId);
 }
 
+export function getLatestDistinctBacktest(backtests: Backtest[], strategyId: string) {
+  const seen = new Set<string>();
+  return backtests
+    .filter((item) => item.strategy_id === strategyId)
+    .filter((item) => {
+      const signature = [
+        item.start_date,
+        item.end_date,
+        item.initial_capital,
+        item.fee_rate ?? "",
+        item.slippage_rate ?? "",
+        item.total_return,
+        item.sharpe_ratio,
+        item.max_drawdown,
+        item.total_trades,
+      ].join("|");
+      if (seen.has(signature)) return false;
+      seen.add(signature);
+      return true;
+    })[0] ?? null;
+}
+
+export function getLatestWalkforwardRun(rows: WalkforwardResult[], strategyId: string) {
+  const candidates = rows.filter((item) => item.strategy_id === strategyId);
+  const groups = new Map<string, WalkforwardResult[]>();
+  for (const row of candidates) {
+    const key = row.run_group_id ?? `${row.strategy_id}-${row.created_at}`;
+    const existing = groups.get(key) ?? [];
+    existing.push(row);
+    groups.set(key, existing);
+  }
+
+  const grouped = Array.from(groups.values())
+    .map((groupRows) => [...groupRows].sort((left, right) => left.window_number - right.window_number))
+    .sort((left, right) => String(right[0]?.created_at ?? "").localeCompare(String(left[0]?.created_at ?? "")));
+
+  return grouped[0] ?? [];
+}
+
+export type ResearchStatus =
+  | "no-runs"
+  | "backtest-only"
+  | "needs-improvement"
+  | "candidate-ready"
+  | "research-watch"
+  | "stale";
+
+export function getResearchSnapshot(backtests: Backtest[], walkforwardRows: WalkforwardResult[], strategyId: string) {
+  const backtest = getLatestDistinctBacktest(backtests, strategyId);
+  const walkforwardRun = getLatestWalkforwardRun(walkforwardRows, strategyId);
+  const passRate =
+    walkforwardRun.length === 0
+      ? null
+      : walkforwardRun.filter((row) => Boolean(row.passed)).length / walkforwardRun.length;
+  const latestTimestamp = new Date(String(walkforwardRun[0]?.created_at ?? backtest?.created_at ?? ""));
+  const now = new Date();
+  const ageDays =
+    Number.isNaN(latestTimestamp.getTime())
+      ? null
+      : Math.floor((now.getTime() - latestTimestamp.getTime()) / (1000 * 60 * 60 * 24));
+
+  let status: ResearchStatus = "no-runs";
+  let label = "Keine Runs";
+
+  if (backtest && walkforwardRun.length === 0) {
+    status = "backtest-only";
+    label = "Nur Backtest";
+  } else if (backtest && walkforwardRun.length > 0) {
+    const sharpe = backtest.sharpe_ratio ?? 0;
+    const totalReturn = backtest.total_return ?? 0;
+    const drawdown = Math.abs(backtest.max_drawdown ?? 0);
+    const trades = backtest.total_trades ?? 0;
+
+    if ((ageDays ?? 0) > 14) {
+      status = "stale";
+      label = "Research stale";
+    } else if (
+      passRate !== null &&
+      passRate >= 0.6 &&
+      sharpe >= 0.75 &&
+      totalReturn > 0 &&
+      drawdown <= 20 &&
+      trades >= 20
+    ) {
+      status = "candidate-ready";
+      label = "Candidate-ready";
+    } else if (
+      passRate !== null &&
+      passRate >= 0.4 &&
+      sharpe >= 0.25 &&
+      drawdown <= 25 &&
+      trades >= 12
+    ) {
+      status = "research-watch";
+      label = "Research watch";
+    } else {
+      status = "needs-improvement";
+      label = "Needs improvement";
+    }
+  }
+
+  return {
+    backtest,
+    walkforwardRun,
+    passRate,
+    ageDays,
+    status,
+    label,
+  };
+}
+
 function clampScore(value: number) {
   return Math.max(0, Math.min(100, Math.round(value)));
 }

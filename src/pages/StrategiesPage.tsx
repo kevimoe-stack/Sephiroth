@@ -8,11 +8,15 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { useCreateStrategy, useStrategies } from "@/hooks/use-trading-data";
+import { useBacktests, useCreateStrategy, useStrategies, useWalkforwardResults } from "@/hooks/use-trading-data";
+import { getResearchSnapshot } from "@/lib/analytics";
 import { buildPilotStrategySeeds } from "@/lib/strategy-presets";
+import { formatDateTime, formatNumber, formatPercent } from "@/lib/utils";
 
 export default function StrategiesPage() {
   const { data: strategies = [] } = useStrategies();
+  const { data: backtests = [] } = useBacktests();
+  const { data: walkforward = [] } = useWalkforwardResults();
   const createStrategy = useCreateStrategy();
   const [query, setQuery] = useState("");
   const [showVariants, setShowVariants] = useState(false);
@@ -22,21 +26,43 @@ export default function StrategiesPage() {
   const missingPilotSeeds = buildPilotStrategySeeds().filter((seed) => !pilotNames.has(String(seed.name ?? "")));
   const filtered = useMemo(
     () =>
-      strategies.filter((strategy) => {
-        const matchesQuery = [strategy.name, strategy.symbol, ...(strategy.tags ?? [])].join(" ").toLowerCase().includes(query.toLowerCase());
-        const isVariant = (strategy.tags ?? []).includes("agent-variant");
-        return matchesQuery && (showVariants || !isVariant);
-      }),
-    [query, showVariants, strategies],
+      strategies
+        .filter((strategy) => {
+          const matchesQuery = [strategy.name, strategy.symbol, ...(strategy.tags ?? [])].join(" ").toLowerCase().includes(query.toLowerCase());
+          const isVariant = (strategy.tags ?? []).includes("agent-variant");
+          return matchesQuery && (showVariants || !isVariant);
+        })
+        .sort((left, right) => {
+          const leftSnapshot = getResearchSnapshot(backtests, walkforward, left.id);
+          const rightSnapshot = getResearchSnapshot(backtests, walkforward, right.id);
+          const priority = {
+            "candidate-ready": 5,
+            "research-watch": 4,
+            "backtest-only": 3,
+            stale: 2,
+            "needs-improvement": 1,
+            "no-runs": 0,
+          } as const;
+          const leftScore = priority[leftSnapshot.status] + (left.is_champion ? 3 : 0) + ((left.tags ?? []).includes("pilot") ? 1 : 0);
+          const rightScore = priority[rightSnapshot.status] + (right.is_champion ? 3 : 0) + ((right.tags ?? []).includes("pilot") ? 1 : 0);
+          return rightScore - leftScore || left.name.localeCompare(right.name);
+        }),
+    [backtests, query, showVariants, strategies, walkforward],
   );
   const summary = useMemo(
-    () => ({
-      total: strategies.length,
-      pilots: strategies.filter((strategy) => (strategy.tags ?? []).includes("pilot")).length,
-      champions: strategies.filter((strategy) => strategy.is_champion).length,
-      variants: strategies.filter((strategy) => (strategy.tags ?? []).includes("agent-variant")).length,
-    }),
-    [strategies],
+    () => {
+      const snapshots = strategies.map((strategy) => getResearchSnapshot(backtests, walkforward, strategy.id));
+      return {
+        total: strategies.length,
+        pilots: strategies.filter((strategy) => (strategy.tags ?? []).includes("pilot")).length,
+        champions: strategies.filter((strategy) => strategy.is_champion).length,
+        variants: strategies.filter((strategy) => (strategy.tags ?? []).includes("agent-variant")).length,
+        candidateReady: snapshots.filter((snapshot) => snapshot.status === "candidate-ready").length,
+        researchWatch: snapshots.filter((snapshot) => snapshot.status === "research-watch").length,
+        stale: snapshots.filter((snapshot) => snapshot.status === "stale").length,
+      };
+    },
+    [backtests, strategies, walkforward],
   );
 
   const handleCreatePilot = async () => {
@@ -91,6 +117,21 @@ export default function StrategiesPage() {
         </Card>
       </div>
 
+      <div className="grid gap-4 md:grid-cols-3">
+        <Card>
+          <CardHeader><CardTitle>Candidate-ready</CardTitle></CardHeader>
+          <CardContent><p className="text-3xl font-semibold">{summary.candidateReady}</p></CardContent>
+        </Card>
+        <Card>
+          <CardHeader><CardTitle>Research Watch</CardTitle></CardHeader>
+          <CardContent><p className="text-3xl font-semibold">{summary.researchWatch}</p></CardContent>
+        </Card>
+        <Card>
+          <CardHeader><CardTitle>Research Stale</CardTitle></CardHeader>
+          <CardContent><p className="text-3xl font-semibold">{summary.stale}</p></CardContent>
+        </Card>
+      </div>
+
       <BulkOperationsDialog />
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
@@ -106,11 +147,53 @@ export default function StrategiesPage() {
                   <div className="flex flex-wrap gap-2">
                     {strategy.is_champion && <Badge variant="success">Champion</Badge>}
                     {(strategy.tags ?? []).includes("pilot") && <Badge variant="secondary">Pilot</Badge>}
+                    {(() => {
+                      const snapshot = getResearchSnapshot(backtests, walkforward, strategy.id);
+                      const variantMap: Record<string, "outline" | "secondary" | "destructive" | "success"> = {
+                        "candidate-ready": "success",
+                        "research-watch": "secondary",
+                        "backtest-only": "outline",
+                        stale: "outline",
+                        "needs-improvement": "destructive",
+                        "no-runs": "outline",
+                      };
+                      return <Badge variant={variantMap[snapshot.status]}>{snapshot.label}</Badge>;
+                    })()}
                   </div>
                 </div>
               </CardHeader>
               <CardContent className="space-y-4 text-sm text-slate-500">
                 <p>{strategy.description}</p>
+                {(() => {
+                  const snapshot = getResearchSnapshot(backtests, walkforward, strategy.id);
+                  const { backtest, walkforwardRun, passRate } = snapshot;
+
+                  if (!backtest && walkforwardRun.length === 0) return null;
+
+                  return (
+                    <div className="space-y-3 rounded-xl bg-muted/70 p-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500">
+                        <span>Letzter Research-Stand</span>
+                        <span>{formatDateTime(walkforwardRun[0]?.created_at ?? backtest?.created_at)}</span>
+                      </div>
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        <div className="space-y-1">
+                          <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Research Snapshot</p>
+                          <p>Return {formatPercent(backtest?.total_return)}</p>
+                          <p>Sharpe {formatNumber(backtest?.sharpe_ratio)}</p>
+                          <p>Max DD {formatPercent(backtest?.max_drawdown)}</p>
+                          <p>Trades {formatNumber(backtest?.total_trades, 0)}</p>
+                        </div>
+                        <div className="space-y-1">
+                          <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Walk-Forward</p>
+                          <p>Fenster {walkforwardRun.length > 0 ? walkforwardRun.length : "-"}</p>
+                          <p>Passrate {passRate === null ? "-" : `${formatNumber(passRate * 100, 0)}%`}</p>
+                          <p>Fee / Slip {backtest ? `${formatNumber(backtest.fee_rate, 4)} / ${formatNumber(backtest.slippage_rate, 4)}` : "-"}</p>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
                 <div className="flex flex-wrap gap-2">
                   <Badge variant="secondary">{strategy.status}</Badge>
                   {(strategy.tags ?? []).slice(0, 8).map((tag) => <Badge key={tag} variant="outline">{tag}</Badge>)}
