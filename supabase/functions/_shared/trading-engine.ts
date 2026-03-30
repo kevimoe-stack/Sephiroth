@@ -39,7 +39,9 @@ interface Trade {
 }
 
 function inferStrategyKind(strategy: StrategyRow) {
+  if (strategy.parameters?.entryModel === "trend-pullback") return "trend-pullback";
   const source = `${strategy.name} ${strategy.description ?? ""}`.toLowerCase();
+  if (source.includes("pullback")) return "trend-pullback";
   if (source.includes("rsi")) return "rsi";
   if (source.includes("boll")) return "bollinger";
   if (source.includes("macd")) return "macd";
@@ -218,6 +220,46 @@ function createSignals(strategy: StrategyRow, candles: Candle[]) {
           values.line[index - 1] >= values.signal[index - 1] &&
           values.line[index] < values.signal[index]
         ) {
+          signals[index] = -1;
+        }
+      }
+      return signals;
+    }
+    case "trend-pullback": {
+      const fastPeriod = Number(params.fastEma ?? params.fast ?? 50);
+      const slowPeriod = Number(params.slowEma ?? params.slow ?? 200);
+      const trendPeriod = Number(params.trendFilterEma ?? 200);
+      const rsiPeriodValue = Number(params.rsiPeriod ?? 14);
+      const pullbackRsi = Number(params.pullbackRsi ?? 44);
+      const recoveryRsi = Number(params.recoveryRsi ?? 52);
+      const exitRsi = Number(params.exitRsi ?? 68);
+      const fast = ema(closes, fastPeriod);
+      const slow = ema(closes, slowPeriod);
+      const trend = ema(closes, trendPeriod);
+      const rsiValues = rsi(closes, rsiPeriodValue);
+
+      for (let index = 1; index < candles.length; index += 1) {
+        const trendUp =
+          Number.isFinite(fast[index]) &&
+          Number.isFinite(slow[index]) &&
+          Number.isFinite(trend[index]) &&
+          closes[index] > trend[index] &&
+          fast[index] > slow[index];
+        const recoveringPullback =
+          Number.isFinite(rsiValues[index - 1]) &&
+          Number.isFinite(rsiValues[index]) &&
+          rsiValues[index - 1] <= pullbackRsi &&
+          rsiValues[index] >= recoveryRsi;
+        if (trendUp && recoveringPullback) {
+          signals[index] = 1;
+        }
+
+        const trendBroken =
+          Number.isFinite(fast[index]) &&
+          Number.isFinite(trend[index]) &&
+          (closes[index] < fast[index] || closes[index] < trend[index]);
+        const momentumExhausted = Number.isFinite(rsiValues[index]) && rsiValues[index] >= exitRsi;
+        if (trendBroken || momentumExhausted) {
           signals[index] = -1;
         }
       }
@@ -456,7 +498,13 @@ export async function runWalkForwardEngine(
     if (inSample.length < 50 || outOfSample.length < 25) continue;
 
     const candidates =
-      inferStrategyKind(strategy) === "ema"
+      inferStrategyKind(strategy) === "trend-pullback"
+        ? [
+            { fastEma: 34, slowEma: 144, trendFilterEma: 144, rsiPeriod: 12, pullbackRsi: 46, recoveryRsi: 54, exitRsi: 66 },
+            { fastEma: 50, slowEma: 200, trendFilterEma: 200, rsiPeriod: 14, pullbackRsi: 44, recoveryRsi: 52, exitRsi: 68 },
+            { fastEma: 55, slowEma: 233, trendFilterEma: 200, rsiPeriod: 14, pullbackRsi: 42, recoveryRsi: 50, exitRsi: 64 },
+          ]
+        : inferStrategyKind(strategy) === "ema"
         ? [{ fast: 8, slow: 21 }, { fast: 12, slow: 26 }, { fast: 21, slow: 55 }]
         : inferStrategyKind(strategy) === "rsi"
           ? [{ rsiPeriod: 10, oversold: 25, exitLevel: 52 }, { rsiPeriod: 14, oversold: 30, exitLevel: 55 }, { rsiPeriod: 21, oversold: 35, exitLevel: 58 }]
@@ -520,7 +568,12 @@ export async function runWalkForwardEngine(
       out_of_sample_max_dd: outResult.metrics.max_drawdown,
       efficiency_ratio: efficiencyRatio,
       optimized_params: bestCandidate,
-      passed: efficiencyRatio > 0.35 && outResult.metrics.sharpe_ratio > -0.35 && outResult.metrics.total_trades >= 2,
+      passed:
+        efficiencyRatio > 0.45 &&
+        outResult.metrics.sharpe_ratio > 0 &&
+        outResult.metrics.total_return > 0 &&
+        Math.abs(outResult.metrics.max_drawdown) <= 20 &&
+        outResult.metrics.total_trades >= 3,
     });
   }
 
