@@ -19,6 +19,54 @@ function stableStringify(value: unknown): string {
   return JSON.stringify(value);
 }
 
+const MAX_IDENTICAL_BACKTEST_RUNS = 2;
+const MAX_BACKTEST_RUNS_PER_STRATEGY = 12;
+
+async function cleanupBacktests(
+  supabase: ReturnType<typeof createClient>,
+  strategyId: string,
+  strategySnapshot: unknown,
+  startDate: string,
+  endDate: string,
+  initialCapital: number,
+  feeRate: number,
+  slippageRate: number,
+) {
+  const { data: matchingBacktests, error: matchingError } = await supabase
+    .from("backtests")
+    .select("id, created_at, strategy_params_snapshot")
+    .eq("strategy_id", strategyId)
+    .eq("start_date", startDate)
+    .eq("end_date", endDate)
+    .eq("initial_capital", initialCapital)
+    .eq("fee_rate", feeRate)
+    .eq("slippage_rate", slippageRate)
+    .order("created_at", { ascending: false });
+  if (matchingError) throw matchingError;
+
+  const identicalRuns = (matchingBacktests ?? []).filter((item) =>
+    stableStringify(item.strategy_params_snapshot ?? {}) === stableStringify(strategySnapshot)
+  );
+  const identicalOverflow = identicalRuns.slice(MAX_IDENTICAL_BACKTEST_RUNS).map((item) => item.id);
+
+  const { data: allBacktests, error: allError } = await supabase
+    .from("backtests")
+    .select("id, created_at")
+    .eq("strategy_id", strategyId)
+    .order("created_at", { ascending: false });
+  if (allError) throw allError;
+
+  const strategyOverflow = (allBacktests ?? []).slice(MAX_BACKTEST_RUNS_PER_STRATEGY).map((item) => item.id);
+  const idsToDelete = Array.from(new Set([...identicalOverflow, ...strategyOverflow]));
+  if (idsToDelete.length === 0) return;
+
+  const { error: tradesDeleteError } = await supabase.from("backtest_trades").delete().in("backtest_id", idsToDelete);
+  if (tradesDeleteError) throw tradesDeleteError;
+
+  const { error: backtestsDeleteError } = await supabase.from("backtests").delete().in("id", idsToDelete);
+  if (backtestsDeleteError) throw backtestsDeleteError;
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -150,6 +198,17 @@ Deno.serve(async (req) => {
       const { error: updateError } = await supabase.from("strategies").update({ tags: nextTags }).eq("id", strategy.id);
       if (updateError) throw updateError;
     }
+
+    await cleanupBacktests(
+      supabase,
+      strategy.id,
+      strategySnapshot,
+      startDate,
+      endDate,
+      initialCapital,
+      feeRate,
+      slippageRate,
+    );
 
     return Response.json(
       {

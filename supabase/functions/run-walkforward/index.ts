@@ -55,6 +55,64 @@ function qualifiesForExecutionWatchlist(backtest: Record<string, unknown> | null
   return sharpe >= 1.05 && drawdown <= 12 && totalReturn > 0 && totalTrades >= 25 && profitFactor >= 1.2 && passRate >= 0.6;
 }
 
+const MAX_IDENTICAL_WALKFORWARD_RUNS = 2;
+const MAX_WALKFORWARD_RUNS_PER_STRATEGY = 8;
+
+async function cleanupWalkforwardRuns(
+  supabase: ReturnType<typeof createClient>,
+  strategyId: string,
+  strategySnapshot: unknown,
+  startDate: string,
+  endDate: string,
+  initialCapital: number,
+  feeRate: number,
+  slippageRate: number,
+  windows: number,
+) {
+  const { data: existingRows, error: existingRowsError } = await supabase
+    .from("walkforward_results")
+    .select("id, run_group_id, created_at, strategy_params_snapshot, run_start_date, run_end_date, initial_capital, fee_rate, slippage_rate, windows_requested")
+    .eq("strategy_id", strategyId)
+    .order("created_at", { ascending: false });
+  if (existingRowsError) throw existingRowsError;
+
+  const grouped = new Map<string, typeof existingRows>();
+  for (const row of existingRows ?? []) {
+    const key = row.run_group_id ?? `${row.created_at}-${row.id}`;
+    const current = grouped.get(key) ?? [];
+    current.push(row);
+    grouped.set(key, current);
+  }
+
+  const groups = Array.from(grouped.values())
+    .map((rows) => ({
+      rows,
+      createdAt: rows[0]?.created_at ?? "",
+      signatureMatch:
+        rows[0]?.run_start_date === startDate &&
+        rows[0]?.run_end_date === endDate &&
+        Number(rows[0]?.initial_capital ?? 0) === Number(initialCapital) &&
+        Number(rows[0]?.fee_rate ?? feeRate) === Number(feeRate) &&
+        Number(rows[0]?.slippage_rate ?? slippageRate) === Number(slippageRate) &&
+        Number(rows[0]?.windows_requested ?? windows) === Number(windows) &&
+        stableStringify(rows[0]?.strategy_params_snapshot ?? {}) === stableStringify(strategySnapshot),
+    }))
+    .sort((left, right) => String(right.createdAt).localeCompare(String(left.createdAt)));
+
+  const identicalOverflow = groups
+    .filter((group) => group.signatureMatch)
+    .slice(MAX_IDENTICAL_WALKFORWARD_RUNS)
+    .flatMap((group) => group.rows.map((row) => row.id));
+  const strategyOverflow = groups
+    .slice(MAX_WALKFORWARD_RUNS_PER_STRATEGY)
+    .flatMap((group) => group.rows.map((row) => row.id));
+  const idsToDelete = Array.from(new Set([...identicalOverflow, ...strategyOverflow]));
+  if (idsToDelete.length === 0) return;
+
+  const { error: deleteError } = await supabase.from("walkforward_results").delete().in("id", idsToDelete);
+  if (deleteError) throw deleteError;
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -299,6 +357,18 @@ Deno.serve(async (req) => {
       })
       .eq("id", strategy.id);
     if (updateError) throw updateError;
+
+    await cleanupWalkforwardRuns(
+      supabase,
+      strategy.id,
+      strategySnapshot,
+      startDate,
+      endDate,
+      initialCapital,
+      feeRate,
+      slippageRate,
+      windows,
+    );
 
     return Response.json(
       {
