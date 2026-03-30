@@ -372,6 +372,11 @@ export default function StrategyDetailPage() {
                   Diese Pilotlinie ist aktuell der Hauptkandidat fuer die naechste Research- und Testnet-Stufe.
                 </p>
               )}
+              {pilotRole === "comparison" && (
+                <p className="mt-3 text-slate-600">
+                  Diese Linie bleibt als Vergleich aktiv, wird aber derzeit bewusst hinter der Fokusspur eingeordnet, bis sich die Research-Lage veraendert.
+                </p>
+              )}
               {pilotComparison.leader && pilotComparison.leader.strategy.id !== strategy.id && (
                 <p className="mt-3 text-slate-600">
                   Aktuell liegt <span className="font-medium">{pilotComparison.leader.strategy.name}</span> vorne. Diese Linie bleibt aber als Vergleich aktiv, bis wir einen klaren Testnet-Kandidaten haben.

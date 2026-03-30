@@ -101,10 +101,21 @@ export default function ExecutionPage() {
   });
   const eligibleCandidates = executionCandidates.filter((row) => row.eligibility.eligible);
   const blockedCandidates = executionCandidates.filter((row) => !row.eligibility.eligible);
-  const selectedStrategyId = strategyId || eligibleCandidates[0]?.strategy.id || executionCandidates[0]?.strategy.id || "";
+  const preferredCandidate =
+    eligibleCandidates.find((row) => getPilotRole(row.strategy.id, pilotComparison) !== "comparison")
+    ?? eligibleCandidates[0]
+    ?? executionCandidates.find((row) => getPilotRole(row.strategy.id, pilotComparison) === "focus")
+    ?? executionCandidates.find((row) => getPilotRole(row.strategy.id, pilotComparison) !== "comparison")
+    ?? executionCandidates[0]
+    ?? null;
+  const selectedStrategyId = strategyId || preferredCandidate?.strategy.id || "";
   const selectedCandidate = executionCandidates.find((row) => row.strategy.id === selectedStrategyId) ?? null;
   const selectedReadiness = selectedCandidate ?? null;
-  const suggestedEligibleCandidate = selectedCandidate?.eligibility.eligible ? selectedCandidate : eligibleCandidates[0] ?? null;
+  const suggestedEligibleCandidate = selectedCandidate?.eligibility.eligible
+    ? selectedCandidate
+    : eligibleCandidates.find((row) => getPilotRole(row.strategy.id, pilotComparison) !== "comparison")
+      ?? eligibleCandidates[0]
+      ?? null;
   const pilotLeader = pilotComparison.leader;
   const allowedAllocation = selectedCandidate?.eligibility.allowedAllocation ?? 0;
   const testnetChecklist = buildTestnetChecklist({
@@ -208,6 +219,11 @@ export default function ExecutionPage() {
                     {!selectedCandidate?.eligibility.eligible && suggestedEligibleCandidate && (
                       <p className="pt-1 text-amber-700">
                         Beste aktuell freigegebene Alternative: {suggestedEligibleCandidate.strategy.name}
+                      </p>
+                    )}
+                    {!suggestedEligibleCandidate && pilotComparison.secondary && selectedCandidate && getPilotRole(selectedCandidate.strategy.id, pilotComparison) === "comparison" && (
+                      <p className="pt-1 text-slate-600">
+                        Diese Linie bleibt als Vergleich aktiv, wird aber aktuell nicht als bevorzugter Execution-Pfad behandelt.
                       </p>
                     )}
                   </div>

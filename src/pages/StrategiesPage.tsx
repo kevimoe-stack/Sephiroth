@@ -185,7 +185,10 @@ export default function StrategiesPage() {
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {filtered.map((strategy) => (
           <Link key={strategy.id} to={`/strategies/${strategy.id}`}>
-            <Card className={strategy.is_champion ? "border-success/40 ring-1 ring-success/30" : undefined}>
+            <Card className={[
+              strategy.is_champion ? "border-success/40 ring-1 ring-success/30" : "",
+              getPilotRole(strategy.id, pilotComparison) === "comparison" ? "opacity-80" : "",
+            ].filter(Boolean).join(" ") || undefined}>
               <CardHeader>
                 <div className="flex items-start justify-between gap-3">
                   <div>
@@ -252,6 +255,11 @@ export default function StrategiesPage() {
                   <Badge variant="secondary">{strategy.status}</Badge>
                   {(strategy.tags ?? []).slice(0, 8).map((tag) => <Badge key={tag} variant="outline">{tag}</Badge>)}
                 </div>
+                {getPilotRole(strategy.id, pilotComparison) === "comparison" && (
+                  <p className="text-xs text-slate-500">
+                    Diese Pilotlinie bleibt fuer Research-Vergleiche sichtbar, wird aber aktuell nicht als Fokuspfad priorisiert.
+                  </p>
+                )}
               </CardContent>
             </Card>
           </Link>
