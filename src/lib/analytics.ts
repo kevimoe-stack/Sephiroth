@@ -119,6 +119,20 @@ export function getResearchSnapshot(backtests: Backtest[], walkforwardRows: Walk
   };
 }
 
+export function computeResearchScore(
+  backtest: Backtest | null | undefined,
+  walkforwardRun: WalkforwardResult[],
+  passRate: number | null,
+) {
+  return (
+    (passRate ?? 0) * 50 +
+    (backtest?.sharpe_ratio ?? 0) * 20 +
+    (backtest?.total_return ?? 0) * 0.4 -
+    Math.abs(backtest?.max_drawdown ?? 0) * 0.8 +
+    Math.min(backtest?.total_trades ?? 0, 40) * 0.5
+  );
+}
+
 function clampScore(value: number) {
   return Math.max(0, Math.min(100, Math.round(value)));
 }

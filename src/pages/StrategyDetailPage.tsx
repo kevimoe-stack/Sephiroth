@@ -20,6 +20,7 @@ import {
   useWalkforwardResults,
 } from "@/hooks/use-trading-data";
 import type { WalkforwardResult } from "@/integrations/supabase/types";
+import { computeResearchScore, getResearchSnapshot } from "@/lib/analytics";
 import { evaluateQualityGates } from "@/lib/quality-gates";
 import { formatCurrency, formatDateTime, formatNumber, formatPercent } from "@/lib/utils";
 
@@ -169,6 +170,26 @@ export default function StrategyDetailPage() {
     if (!displayedWalkforwardRun?.strategyParamsSnapshot) return true;
     return stableStringify(displayedWalkforwardRun.strategyParamsSnapshot) === stableStringify(strategy?.parameters ?? {});
   }, [displayedWalkforwardRun?.strategyParamsSnapshot, strategy?.parameters]);
+  const pilotComparison = useMemo(() => {
+    if (!strategy) return null;
+    const pilots = strategies
+      .filter((item) => (item.tags ?? []).includes("pilot"))
+      .map((item) => {
+        const snapshot = getResearchSnapshot(backtests, walkforward, item.id);
+        return {
+          strategy: item,
+          snapshot,
+          score: computeResearchScore(snapshot.backtest, snapshot.walkforwardRun, snapshot.passRate),
+        };
+      })
+      .sort((left, right) => right.score - left.score);
+
+    if (!isPilotStrategy || pilots.length === 0) return null;
+
+    const current = pilots.find((item) => item.strategy.id === strategy.id) ?? null;
+    const leader = pilots[0] ?? null;
+    return current ? { current, leader } : null;
+  }, [backtests, isPilotStrategy, strategies, strategy, walkforward]);
 
   if (!strategy) return <div>Strategie nicht gefunden.</div>;
 
@@ -343,6 +364,27 @@ export default function StrategyDetailPage() {
         </CardHeader>
         <CardContent>
           <p className="text-sm text-slate-600">{strategy.description ?? "Keine Beschreibung vorhanden."}</p>
+          {pilotComparison?.current && (
+            <div className="mt-4 rounded-xl border border-primary/20 bg-primary/5 p-4 text-sm text-slate-700">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="font-medium">Pilot-Einordnung</p>
+                <Badge variant={pilotComparison.leader?.strategy.id === strategy.id ? "success" : "secondary"}>
+                  {pilotComparison.leader?.strategy.id === strategy.id ? "Fuehrt aktuell" : "Vergleichspilot aktiv"}
+                </Badge>
+              </div>
+              <div className="mt-3 grid gap-2 md:grid-cols-2">
+                <p>Research-Score {formatNumber(pilotComparison.current.score)}</p>
+                <p>Status {pilotComparison.current.snapshot.label}</p>
+                <p>Return {formatPercent(pilotComparison.current.snapshot.backtest?.total_return)}</p>
+                <p>Passrate {pilotComparison.current.snapshot.passRate === null ? "-" : `${formatNumber(pilotComparison.current.snapshot.passRate * 100, 0)}%`}</p>
+              </div>
+              {pilotComparison.leader && pilotComparison.leader.strategy.id !== strategy.id && (
+                <p className="mt-3 text-slate-600">
+                  Aktuell liegt <span className="font-medium">{pilotComparison.leader.strategy.name}</span> vorne. Diese Linie bleibt aber als Vergleich aktiv, bis wir einen klaren Testnet-Kandidaten haben.
+                </p>
+              )}
+            </div>
+          )}
           {(strategy.tags ?? []).includes("optimizer-paused") && (
             <p className="mt-3 text-sm text-amber-600">
               Der automatische Optimizer ist fuer diese Elternstrategie aktuell pausiert, weil mehrere Varianten zuletzt wiederholt gescheitert sind. Manuelle Experimente sind weiter moeglich.

@@ -23,7 +23,7 @@ import {
   useTournamentRuns,
   useWalkforwardResults,
 } from "@/hooks/use-trading-data";
-import { computeHealth } from "@/lib/analytics";
+import { computeHealth, computeResearchScore, getResearchSnapshot } from "@/lib/analytics";
 import { buildTestnetChecklist } from "@/lib/deployment";
 import { buildExecutionEligibility, buildReadinessReport } from "@/lib/readiness";
 import { formatNumber, formatPercent } from "@/lib/utils";
@@ -99,6 +99,17 @@ export default function ExecutionPage() {
   const selectedCandidate = executionCandidates.find((row) => row.strategy.id === selectedStrategyId) ?? null;
   const selectedReadiness = selectedCandidate ?? null;
   const suggestedEligibleCandidate = selectedCandidate?.eligibility.eligible ? selectedCandidate : eligibleCandidates[0] ?? null;
+  const pilotLeader = strategies
+    .filter((strategy) => (strategy.tags ?? []).includes("pilot"))
+    .map((strategy) => {
+      const snapshot = getResearchSnapshot(backtests, wf, strategy.id);
+      return {
+        strategy,
+        snapshot,
+        score: computeResearchScore(snapshot.backtest, snapshot.walkforwardRun, snapshot.passRate),
+      };
+    })
+    .sort((left, right) => right.score - left.score)[0] ?? null;
   const allowedAllocation = selectedCandidate?.eligibility.allowedAllocation ?? 0;
   const testnetChecklist = buildTestnetChecklist({
     readiness: executionReadiness,
@@ -206,6 +217,16 @@ export default function ExecutionPage() {
                   </div>
                 ) : (
                   <p className="mt-3 text-emerald-600">Die aktuelle UI-Freigabe erlaubt einen kontrollierten Dry-Run fuer diese Strategie.</p>
+                )}
+                {!suggestedEligibleCandidate && pilotLeader && (
+                  <div className="mt-3 rounded-xl border border-primary/20 bg-primary/5 p-3 text-slate-700">
+                    <p className="font-medium">Pilot-Empfehlung fuer die naechste Research-Runde</p>
+                    <p className="mt-1">{pilotLeader.strategy.name}</p>
+                    <p className="mt-1 text-sm">
+                      Score {formatNumber(pilotLeader.score)} · Status {pilotLeader.snapshot.label} · Passrate{" "}
+                      {pilotLeader.snapshot.passRate === null ? "-" : `${formatNumber(pilotLeader.snapshot.passRate * 100, 0)}%`}
+                    </p>
+                  </div>
                 )}
               </div>
               <div className="flex flex-wrap gap-3">

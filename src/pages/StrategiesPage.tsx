@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { useBacktests, useCreateStrategy, useStrategies, useWalkforwardResults } from "@/hooks/use-trading-data";
-import { getResearchSnapshot } from "@/lib/analytics";
+import { computeResearchScore, getResearchSnapshot } from "@/lib/analytics";
 import { buildPilotStrategySeeds } from "@/lib/strategy-presets";
 import { formatDateTime, formatNumber, formatPercent } from "@/lib/utils";
 
@@ -66,15 +66,10 @@ export default function StrategiesPage() {
   );
   const pilotComparison = useMemo(() => {
     const pilots = strategies
-      .filter((strategy) => (strategy.tags ?? []).includes("pilot"))
-      .map((strategy) => {
-        const snapshot = getResearchSnapshot(backtests, walkforward, strategy.id);
-        const score =
-          (snapshot.passRate ?? 0) * 50 +
-          (snapshot.backtest?.sharpe_ratio ?? 0) * 20 +
-          (snapshot.backtest?.total_return ?? 0) * 0.4 -
-          Math.abs(snapshot.backtest?.max_drawdown ?? 0) * 0.8 +
-          Math.min(snapshot.backtest?.total_trades ?? 0, 40) * 0.5;
+        .filter((strategy) => (strategy.tags ?? []).includes("pilot"))
+        .map((strategy) => {
+          const snapshot = getResearchSnapshot(backtests, walkforward, strategy.id);
+          const score = computeResearchScore(snapshot.backtest, snapshot.walkforwardRun, snapshot.passRate);
 
         return {
           strategy,
