@@ -405,7 +405,7 @@ export default function StrategyDetailPage() {
         </Card>
       </div>
 
-      <div className="grid gap-6 xl:grid-cols-2">
+      <div className="grid gap-6 2xl:grid-cols-2">
         <Card>
           <CardHeader>
             <CardTitle>Backtest</CardTitle>
@@ -455,7 +455,7 @@ export default function StrategyDetailPage() {
             {recentBacktests.length > 0 && (
               <div className="space-y-3">
                 <p className="text-sm font-medium">Letzte gespeicherte Backtests</p>
-                <div className="flex flex-wrap gap-2">
+                <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
                   {recentBacktests.map((backtest) => (
                     <Button
                       key={backtest.id}
@@ -468,44 +468,48 @@ export default function StrategyDetailPage() {
                         setInitialCapital(Number(backtest.initial_capital));
                       }}
                     >
-                      {backtest.start_date} → {backtest.end_date}
-                      {(backtest.fee_rate ?? null) !== null || (backtest.slippage_rate ?? null) !== null
-                        ? ` · fee ${formatNumber(backtest.fee_rate ?? 0, 4)} · slip ${formatNumber(backtest.slippage_rate ?? 0, 4)}`
-                        : ""}
+                      <span className="block text-left">
+                        <span className="block">{backtest.start_date} → {backtest.end_date}</span>
+                        {((backtest.fee_rate ?? null) !== null || (backtest.slippage_rate ?? null) !== null) && (
+                          <span className="block text-xs text-slate-500">
+                            fee {formatNumber(backtest.fee_rate ?? 0, 4)} · slip {formatNumber(backtest.slippage_rate ?? 0, 4)}
+                          </span>
+                        )}
+                      </span>
                     </Button>
                   ))}
                 </div>
               </div>
             )}
 
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
               <div className="min-h-24 rounded-xl bg-muted p-4">
                 <p className="text-xs uppercase tracking-wide text-slate-500">Return</p>
-                <p className="mt-2 text-3xl font-semibold leading-none">{formatPercent(displayedBacktest?.total_return)}</p>
+                <p className="mt-2 text-2xl font-semibold leading-tight xl:text-3xl">{formatPercent(displayedBacktest?.total_return)}</p>
               </div>
               <div className="min-h-24 rounded-xl bg-muted p-4">
                 <p className="text-xs uppercase tracking-wide text-slate-500">Sharpe</p>
-                <p className="mt-2 text-3xl font-semibold leading-none">{formatNumber(displayedBacktest?.sharpe_ratio)}</p>
+                <p className="mt-2 text-2xl font-semibold leading-tight xl:text-3xl">{formatNumber(displayedBacktest?.sharpe_ratio)}</p>
               </div>
               <div className="min-h-24 rounded-xl bg-muted p-4">
                 <p className="text-xs uppercase tracking-wide text-slate-500">Max DD</p>
-                <p className="mt-2 text-3xl font-semibold leading-none">{formatPercent(displayedBacktest?.max_drawdown)}</p>
+                <p className="mt-2 text-2xl font-semibold leading-tight xl:text-3xl">{formatPercent(displayedBacktest?.max_drawdown)}</p>
               </div>
               <div className="min-h-24 rounded-xl bg-muted p-4">
                 <p className="text-xs uppercase tracking-wide text-slate-500">Win Rate</p>
-                <p className="mt-2 text-3xl font-semibold leading-none">{formatPercent(displayedBacktest?.win_rate)}</p>
+                <p className="mt-2 text-2xl font-semibold leading-tight xl:text-3xl">{formatPercent(displayedBacktest?.win_rate)}</p>
               </div>
               <div className="min-h-24 rounded-xl bg-muted p-4">
                 <p className="text-xs uppercase tracking-wide text-slate-500">Trades</p>
-                <p className="mt-2 text-3xl font-semibold leading-none">{formatNumber(displayedBacktest?.total_trades, 0)}</p>
+                <p className="mt-2 text-2xl font-semibold leading-tight xl:text-3xl">{formatNumber(displayedBacktest?.total_trades, 0)}</p>
               </div>
               <div className="min-h-24 rounded-xl bg-muted p-4">
                 <p className="text-xs uppercase tracking-wide text-slate-500">Gewinner</p>
-                <p className="mt-2 text-3xl font-semibold leading-none">{formatNumber(displayedBacktest?.winning_trades, 0)}</p>
+                <p className="mt-2 text-2xl font-semibold leading-tight xl:text-3xl">{formatNumber(displayedBacktest?.winning_trades, 0)}</p>
               </div>
               <div className="min-h-24 rounded-xl bg-muted p-4">
                 <p className="text-xs uppercase tracking-wide text-slate-500">Verlierer</p>
-                <p className="mt-2 text-3xl font-semibold leading-none">{formatNumber(displayedBacktest?.losing_trades, 0)}</p>
+                <p className="mt-2 text-2xl font-semibold leading-tight xl:text-3xl">{formatNumber(displayedBacktest?.losing_trades, 0)}</p>
               </div>
             </div>
 
@@ -541,7 +545,7 @@ export default function StrategyDetailPage() {
               </div>
             )}
 
-            <div className="h-[260px]">
+            <div className="h-[260px] xl:h-[300px]">
               <ResponsiveContainer width="100%" height="100%">
                 <AreaChart data={displayedBacktest?.equity_curve ?? []}>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} />
@@ -630,7 +634,7 @@ export default function StrategyDetailPage() {
               </div>
             </div>
 
-            <div className="h-[260px]">
+            <div className="h-[260px] xl:h-[300px]">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={wfRows}>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} />
