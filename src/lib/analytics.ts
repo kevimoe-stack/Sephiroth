@@ -159,6 +159,46 @@ export function getPilotComparison(strategies: Strategy[], backtests: Backtest[]
   };
 }
 
+export function getPilotRole(
+  strategyId: string,
+  pilotComparison?: ReturnType<typeof getPilotComparison> | null,
+) {
+  if (!pilotComparison) return null;
+  if (pilotComparison.leader?.strategy.id === strategyId) return "focus";
+  if (pilotComparison.secondary?.strategy.id === strategyId) return "comparison";
+  return null;
+}
+
+export function computeStrategyPriority(
+  strategy: Strategy,
+  backtests: Backtest[],
+  walkforwardRows: WalkforwardResult[],
+  pilotComparison?: ReturnType<typeof getPilotComparison> | null,
+) {
+  const snapshot = getResearchSnapshot(backtests, walkforwardRows, strategy.id);
+  const researchPriority = {
+    "candidate-ready": 5,
+    "research-watch": 4,
+    "backtest-only": 3,
+    stale: 2,
+    "needs-improvement": 1,
+    "no-runs": 0,
+  } as const;
+
+  let score = researchPriority[snapshot.status];
+  if (strategy.is_champion) score += 3;
+  if ((strategy.tags ?? []).includes("pilot")) score += 1;
+
+  const pilotRole = getPilotRole(strategy.id, pilotComparison);
+  if (pilotRole === "focus") score += 2;
+  if (pilotRole === "comparison") score -= 1;
+
+  return {
+    snapshot,
+    priorityScore: score,
+  };
+}
+
 function clampScore(value: number) {
   return Math.max(0, Math.min(100, Math.round(value)));
 }

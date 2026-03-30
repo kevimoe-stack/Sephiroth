@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { useBacktests, useCreateStrategy, useStrategies, useWalkforwardResults } from "@/hooks/use-trading-data";
-import { getPilotComparison, getResearchSnapshot } from "@/lib/analytics";
+import { computeStrategyPriority, getPilotComparison, getPilotRole, getResearchSnapshot } from "@/lib/analytics";
 import { buildPilotStrategySeeds } from "@/lib/strategy-presets";
 import { formatDateTime, formatNumber, formatPercent } from "@/lib/utils";
 
@@ -24,6 +24,7 @@ export default function StrategiesPage() {
     strategies.filter((strategy) => (strategy.tags ?? []).includes("pilot")).map((strategy) => strategy.name),
   );
   const missingPilotSeeds = buildPilotStrategySeeds().filter((seed) => !pilotNames.has(String(seed.name ?? "")));
+  const pilotComparison = useMemo(() => getPilotComparison(strategies, backtests, walkforward), [backtests, strategies, walkforward]);
   const filtered = useMemo(
     () =>
       strategies
@@ -33,21 +34,11 @@ export default function StrategiesPage() {
           return matchesQuery && (showVariants || !isVariant);
         })
         .sort((left, right) => {
-          const leftSnapshot = getResearchSnapshot(backtests, walkforward, left.id);
-          const rightSnapshot = getResearchSnapshot(backtests, walkforward, right.id);
-          const priority = {
-            "candidate-ready": 5,
-            "research-watch": 4,
-            "backtest-only": 3,
-            stale: 2,
-            "needs-improvement": 1,
-            "no-runs": 0,
-          } as const;
-          const leftScore = priority[leftSnapshot.status] + (left.is_champion ? 3 : 0) + ((left.tags ?? []).includes("pilot") ? 1 : 0);
-          const rightScore = priority[rightSnapshot.status] + (right.is_champion ? 3 : 0) + ((right.tags ?? []).includes("pilot") ? 1 : 0);
+          const leftScore = computeStrategyPriority(left, backtests, walkforward, pilotComparison).priorityScore;
+          const rightScore = computeStrategyPriority(right, backtests, walkforward, pilotComparison).priorityScore;
           return rightScore - leftScore || left.name.localeCompare(right.name);
         }),
-    [backtests, query, showVariants, strategies, walkforward],
+    [backtests, pilotComparison, query, showVariants, strategies, walkforward],
   );
   const summary = useMemo(
     () => {
@@ -64,7 +55,6 @@ export default function StrategiesPage() {
     },
     [backtests, strategies, walkforward],
   );
-  const pilotComparison = useMemo(() => getPilotComparison(strategies, backtests, walkforward), [backtests, strategies, walkforward]);
 
   const handleCreatePilot = async () => {
     if (missingPilotSeeds.length === 0) {
@@ -205,6 +195,12 @@ export default function StrategiesPage() {
                   <div className="flex flex-wrap gap-2">
                     {strategy.is_champion && <Badge variant="success">Champion</Badge>}
                     {(strategy.tags ?? []).includes("pilot") && <Badge variant="secondary">Pilot</Badge>}
+                    {(() => {
+                      const pilotRole = getPilotRole(strategy.id, pilotComparison);
+                      if (pilotRole === "focus") return <Badge variant="success">Pilot-Fokus</Badge>;
+                      if (pilotRole === "comparison") return <Badge variant="outline">Vergleichslinie</Badge>;
+                      return null;
+                    })()}
                     {(() => {
                       const snapshot = getResearchSnapshot(backtests, walkforward, strategy.id);
                       const variantMap: Record<string, "outline" | "secondary" | "destructive" | "success"> = {

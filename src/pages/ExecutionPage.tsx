@@ -23,7 +23,7 @@ import {
   useTournamentRuns,
   useWalkforwardResults,
 } from "@/hooks/use-trading-data";
-import { computeHealth, getPilotComparison } from "@/lib/analytics";
+import { computeHealth, computeStrategyPriority, getPilotComparison, getPilotRole } from "@/lib/analytics";
 import { buildTestnetChecklist } from "@/lib/deployment";
 import { buildExecutionEligibility, buildReadinessReport } from "@/lib/readiness";
 import { formatNumber, formatPercent } from "@/lib/utils";
@@ -78,12 +78,14 @@ export default function ExecutionPage() {
     activeConfig: null,
     liveOrders,
   });
+  const pilotComparison = getPilotComparison(strategies, backtests, wf);
   const executionCandidates = readinessRows.map((row) => {
     const metaAllocation = latestMetaEntries.find((entry) => entry.strategy_id === row.strategy.id);
     const lifecycleAllocation = latestAllocations.find((entry) => entry.strategy_id === row.strategy.id);
     const allowedAllocation = metaAllocation?.suggested_allocation ?? lifecycleAllocation?.allocation_percent ?? 0;
     return {
       ...row,
+      strategyPriority: computeStrategyPriority(row.strategy, backtests, wf, pilotComparison).priorityScore,
       eligibility: buildExecutionEligibility({
         strategy: row.strategy,
         readinessScore: row.readinessScore,
@@ -92,6 +94,10 @@ export default function ExecutionPage() {
         platformReadiness: executionReadiness,
       }),
     };
+  }).sort((left, right) => {
+    if (right.strategyPriority !== left.strategyPriority) return right.strategyPriority - left.strategyPriority;
+    if (right.readinessScore !== left.readinessScore) return right.readinessScore - left.readinessScore;
+    return left.strategy.name.localeCompare(right.strategy.name);
   });
   const eligibleCandidates = executionCandidates.filter((row) => row.eligibility.eligible);
   const blockedCandidates = executionCandidates.filter((row) => !row.eligibility.eligible);
@@ -99,7 +105,6 @@ export default function ExecutionPage() {
   const selectedCandidate = executionCandidates.find((row) => row.strategy.id === selectedStrategyId) ?? null;
   const selectedReadiness = selectedCandidate ?? null;
   const suggestedEligibleCandidate = selectedCandidate?.eligibility.eligible ? selectedCandidate : eligibleCandidates[0] ?? null;
-  const pilotComparison = getPilotComparison(strategies, backtests, wf);
   const pilotLeader = pilotComparison.leader;
   const allowedAllocation = selectedCandidate?.eligibility.allowedAllocation ?? 0;
   const testnetChecklist = buildTestnetChecklist({
@@ -229,7 +234,14 @@ export default function ExecutionPage() {
                 <select className="min-w-[240px] rounded-xl border border-border bg-background px-3 py-2 text-foreground" value={selectedStrategyId} onChange={(event) => setStrategyId(event.target.value)}>
                   {executionCandidates.map((row) => (
                     <option key={row.strategy.id} value={row.strategy.id}>
-                      {row.strategy.name}{row.eligibility.eligible ? " | testnet-ready" : " | blocked"}
+                      {row.strategy.name}
+                      {(() => {
+                        const pilotRole = getPilotRole(row.strategy.id, pilotComparison);
+                        if (pilotRole === "focus") return " | pilot-focus";
+                        if (pilotRole === "comparison") return " | comparison";
+                        return "";
+                      })()}
+                      {row.eligibility.eligible ? " | testnet-ready" : " | blocked"}
                     </option>
                   ))}
                 </select>

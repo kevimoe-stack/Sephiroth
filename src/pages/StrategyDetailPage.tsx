@@ -20,7 +20,7 @@ import {
   useWalkforwardResults,
 } from "@/hooks/use-trading-data";
 import type { WalkforwardResult } from "@/integrations/supabase/types";
-import { getPilotComparison } from "@/lib/analytics";
+import { getPilotComparison, getPilotRole } from "@/lib/analytics";
 import { evaluateQualityGates } from "@/lib/quality-gates";
 import { formatCurrency, formatDateTime, formatNumber, formatPercent } from "@/lib/utils";
 
@@ -176,6 +176,7 @@ export default function StrategyDetailPage() {
     const current = comparison.pilots.find((item) => item.strategy.id === strategy.id) ?? null;
     return current ? { ...comparison, current } : null;
   }, [backtests, isPilotStrategy, strategies, strategy, walkforward]);
+  const pilotRole = getPilotRole(strategy?.id ?? "", pilotComparison);
 
   if (!strategy) return <div>Strategie nicht gefunden.</div>;
 
@@ -316,6 +317,8 @@ export default function StrategyDetailPage() {
                 <Badge variant="secondary">{strategy.status}</Badge>
                 {strategy.is_champion && <Badge variant="success">Champion</Badge>}
                 {isPilotStrategy && <Badge variant="secondary">Pilot</Badge>}
+                {pilotRole === "focus" && <Badge variant="success">Pilot-Fokus</Badge>}
+                {pilotRole === "comparison" && <Badge variant="outline">Vergleichslinie</Badge>}
                 <Badge variant={qualityGate.passed ? "success" : "warning"}>{qualityGate.passed ? "Research-ready" : "Gate blockiert"}</Badge>
                 {(strategy.tags ?? []).includes("optimizer-paused") && <Badge variant="warning">Optimizer pausiert</Badge>}
               </div>
@@ -533,17 +536,20 @@ export default function StrategyDetailPage() {
             {recentBacktests.length > 0 && (
               <div className="space-y-3">
                 <p className="text-sm font-medium">Letzte gespeicherte Backtests</p>
-                <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">
+                <div className="grid gap-2 sm:grid-cols-2 2xl:grid-cols-3">
                   {recentBacktests.map((backtest) => (
                     <Button
                       key={backtest.id}
                       type="button"
                       variant={displayedBacktest?.id === backtest.id ? "secondary" : "outline"}
                       size="sm"
+                      className="h-auto justify-start py-3 text-left"
                       onClick={() => {
                         setStartDate(backtest.start_date);
                         setEndDate(backtest.end_date);
                         setInitialCapital(Number(backtest.initial_capital));
+                        setFeeRate(Number(backtest.fee_rate ?? feeRate));
+                        setSlippageRate(Number(backtest.slippage_rate ?? slippageRate));
                       }}
                     >
                       <span className="block text-left">
@@ -560,34 +566,34 @@ export default function StrategyDetailPage() {
               </div>
             )}
 
-            <div className="grid gap-3 grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
-              <div className="min-h-24 rounded-xl bg-muted p-4">
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+              <div className="min-h-28 rounded-xl bg-muted p-4">
                 <p className="text-xs uppercase tracking-wide text-slate-500">Return</p>
-                <p className="mt-2 text-xl font-semibold leading-tight tracking-tight lg:text-2xl">{formatPercent(displayedBacktest?.total_return)}</p>
+                <p className="mt-2 text-2xl font-semibold leading-tight tracking-tight 2xl:text-3xl">{formatPercent(displayedBacktest?.total_return)}</p>
               </div>
-              <div className="min-h-24 rounded-xl bg-muted p-4">
+              <div className="min-h-28 rounded-xl bg-muted p-4">
                 <p className="text-xs uppercase tracking-wide text-slate-500">Sharpe</p>
-                <p className="mt-2 text-xl font-semibold leading-tight tracking-tight lg:text-2xl">{formatNumber(displayedBacktest?.sharpe_ratio)}</p>
+                <p className="mt-2 text-2xl font-semibold leading-tight tracking-tight 2xl:text-3xl">{formatNumber(displayedBacktest?.sharpe_ratio)}</p>
               </div>
-              <div className="min-h-24 rounded-xl bg-muted p-4">
+              <div className="min-h-28 rounded-xl bg-muted p-4">
                 <p className="text-xs uppercase tracking-wide text-slate-500">Max DD</p>
-                <p className="mt-2 text-xl font-semibold leading-tight tracking-tight lg:text-2xl">{formatPercent(displayedBacktest?.max_drawdown)}</p>
+                <p className="mt-2 text-2xl font-semibold leading-tight tracking-tight 2xl:text-3xl">{formatPercent(displayedBacktest?.max_drawdown)}</p>
               </div>
-              <div className="min-h-24 rounded-xl bg-muted p-4">
+              <div className="min-h-28 rounded-xl bg-muted p-4">
                 <p className="text-xs uppercase tracking-wide text-slate-500">Win Rate</p>
-                <p className="mt-2 text-xl font-semibold leading-tight tracking-tight lg:text-2xl">{formatPercent(displayedBacktest?.win_rate)}</p>
+                <p className="mt-2 text-2xl font-semibold leading-tight tracking-tight 2xl:text-3xl">{formatPercent(displayedBacktest?.win_rate)}</p>
               </div>
-              <div className="min-h-24 rounded-xl bg-muted p-4">
+              <div className="min-h-28 rounded-xl bg-muted p-4">
                 <p className="text-xs uppercase tracking-wide text-slate-500">Trades</p>
-                <p className="mt-2 text-xl font-semibold leading-tight tracking-tight lg:text-2xl">{formatNumber(displayedBacktest?.total_trades, 0)}</p>
+                <p className="mt-2 text-2xl font-semibold leading-tight tracking-tight 2xl:text-3xl">{formatNumber(displayedBacktest?.total_trades, 0)}</p>
               </div>
-              <div className="min-h-24 rounded-xl bg-muted p-4">
+              <div className="min-h-28 rounded-xl bg-muted p-4">
                 <p className="text-xs uppercase tracking-wide text-slate-500">Gewinner</p>
-                <p className="mt-2 text-xl font-semibold leading-tight tracking-tight lg:text-2xl">{formatNumber(displayedBacktest?.winning_trades, 0)}</p>
+                <p className="mt-2 text-2xl font-semibold leading-tight tracking-tight 2xl:text-3xl">{formatNumber(displayedBacktest?.winning_trades, 0)}</p>
               </div>
-              <div className="min-h-24 rounded-xl bg-muted p-4">
+              <div className="min-h-28 rounded-xl bg-muted p-4 sm:col-span-2 xl:col-span-1">
                 <p className="text-xs uppercase tracking-wide text-slate-500">Verlierer</p>
-                <p className="mt-2 text-xl font-semibold leading-tight tracking-tight lg:text-2xl">{formatNumber(displayedBacktest?.losing_trades, 0)}</p>
+                <p className="mt-2 text-2xl font-semibold leading-tight tracking-tight 2xl:text-3xl">{formatNumber(displayedBacktest?.losing_trades, 0)}</p>
               </div>
             </div>
 
