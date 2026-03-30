@@ -46,6 +46,36 @@ function clampScore(value: number) {
   return Math.max(0, Math.min(100, Math.round(value)));
 }
 
+function computePassRate(rows: Array<Record<string, unknown>>) {
+  if (rows.length === 0) return 0;
+  return rows.filter((row) => Boolean(row.passed)).length / rows.length;
+}
+
+function computeResearchScore(
+  backtest: Record<string, unknown> | null,
+  walkforwardRows: Array<Record<string, unknown>>,
+) {
+  return (
+    computePassRate(walkforwardRows) * 50 +
+    Number(backtest?.sharpe_ratio ?? 0) * 20 +
+    Number(backtest?.total_return ?? 0) * 0.4 -
+    Math.abs(Number(backtest?.max_drawdown ?? 0)) * 0.8 +
+    Math.min(Number(backtest?.total_trades ?? 0), 40) * 0.5
+  );
+}
+
+function getPilotRole(
+  strategy: Record<string, unknown>,
+  pilotLeaderId: string | null,
+  pilotSecondaryId: string | null,
+) {
+  const tags = Array.isArray(strategy.tags) ? strategy.tags : [];
+  if (!tags.includes("pilot")) return null;
+  if (String(strategy.id) === pilotLeaderId) return "focus";
+  if (String(strategy.id) === pilotSecondaryId) return "comparison";
+  return "pilot";
+}
+
 function computeOperationalFeedback(
   paperPortfolio: Record<string, unknown> | null,
   livePortfolio: Record<string, unknown> | null,
@@ -140,6 +170,19 @@ Deno.serve(async (req) => {
     const variants = allStrategies.filter(isAgentVariant);
     const parentStrategies = allStrategies.filter((strategy) => !isAgentVariant(strategy));
     const globalRiskRule = (riskRules ?? []).find((rule) => Boolean(rule.is_global)) ?? null;
+    const pilotRanking = parentStrategies
+      .filter((strategy) => Array.isArray(strategy.tags) && strategy.tags.includes("pilot"))
+      .map((strategy) => {
+        const latestBacktest = (backtests ?? []).find((item) => item.strategy_id === strategy.id) ?? null;
+        const strategyWalkforward = (walkforward ?? []).filter((item) => item.strategy_id === strategy.id);
+        return {
+          id: String(strategy.id),
+          score: computeResearchScore(latestBacktest, strategyWalkforward),
+        };
+      })
+      .sort((left, right) => right.score - left.score);
+    const pilotLeaderId = pilotRanking[0]?.id ?? null;
+    const pilotSecondaryId = pilotRanking[1]?.id ?? null;
 
     const optimizerCandidates = parentStrategies
       .map((strategy) => {
@@ -154,6 +197,7 @@ Deno.serve(async (req) => {
         const totalReturn = Number(latestBacktest?.total_return ?? 0);
         const drawdown = Math.abs(Number(latestBacktest?.max_drawdown ?? 0));
         const readinessGap = Math.max(0, 70 - clampScore(25 + sharpe * 12 + qualityGate.passRate * 30 + (Number(latestBacktest?.total_trades ?? 0) >= 20 ? 18 : 4) - drawdown * 0.6));
+        const pilotRole = getPilotRole(strategy, pilotLeaderId, pilotSecondaryId);
         const candidateScore =
           sharpe * -12 +
           drawdown * 2 +
@@ -161,8 +205,10 @@ Deno.serve(async (req) => {
           readinessGap * 1.4 +
           (operational.score === null ? 0 : (100 - operational.score) * 0.45) +
           operational.blockedOrders * 6 +
-          operational.errorOrders * 8;
-        return { strategy, latestBacktest, qualityGate, operational, candidateScore };
+          operational.errorOrders * 8 +
+          (pilotRole === "focus" ? 12 : 0) +
+          (pilotRole === "comparison" ? -8 : 0);
+        return { strategy, latestBacktest, qualityGate, operational, candidateScore, pilotRole };
       })
       .filter(({ strategy, latestBacktest, qualityGate }) => {
         if (!latestBacktest) return false;
@@ -199,11 +245,12 @@ Deno.serve(async (req) => {
         if (walkforwardResult.error) throw walkforwardResult.error;
       }
 
-      optimizedParents.push({
+        optimizedParents.push({
         strategy_id: candidate.strategy.id,
         strategy_name: candidate.strategy.name,
         variants_created: packVariants.length,
         optimization_priority: candidate.candidateScore,
+        pilot_role: candidate.pilotRole,
         operational_score: candidate.operational.score,
         operational_reasons: candidate.operational.reasons,
       });
