@@ -31,14 +31,31 @@ function getLatestMatchingBacktest<T extends { created_at?: string; start_date?:
   startDate: string,
   endDate: string,
   initialCapital: number,
+  feeRate?: number,
+  slippageRate?: number,
 ) {
   return [...rows]
     .filter((row) =>
       row.start_date === startDate &&
       row.end_date === endDate &&
-      Number(row.initial_capital ?? 0) === Number(initialCapital)
+      Number(row.initial_capital ?? 0) === Number(initialCapital) &&
+      (feeRate === undefined || Number((row as T & { fee_rate?: number | null }).fee_rate ?? feeRate) === Number(feeRate)) &&
+      (slippageRate === undefined || Number((row as T & { slippage_rate?: number | null }).slippage_rate ?? slippageRate) === Number(slippageRate))
     )
     .sort((left, right) => String(right.created_at ?? "").localeCompare(String(left.created_at ?? "")))[0] ?? null;
+}
+
+function stableStringify(value: unknown): string {
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => stableStringify(item)).join(",")}]`;
+  }
+  if (value && typeof value === "object") {
+    return `{${Object.entries(value as Record<string, unknown>)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, item]) => `${key}:${stableStringify(item)}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value);
 }
 
 export default function StrategyDetailPage() {
@@ -72,14 +89,28 @@ export default function StrategyDetailPage() {
   const strategyBacktests = backtests.filter((item) => item.strategy_id === id);
   const latestBacktest = getLatestBacktest(strategyBacktests);
   const matchingBacktest = useMemo(
-    () => getLatestMatchingBacktest(strategyBacktests, startDate, endDate, initialCapital),
-    [endDate, initialCapital, startDate, strategyBacktests],
+    () => getLatestMatchingBacktest(strategyBacktests, startDate, endDate, initialCapital, feeRate, slippageRate),
+    [endDate, feeRate, initialCapital, slippageRate, startDate, strategyBacktests],
   );
   const displayedBacktest = matchingBacktest ?? latestBacktest;
-  const recentBacktests = useMemo(
-    () => [...strategyBacktests].sort((left, right) => String(right.created_at ?? "").localeCompare(String(left.created_at ?? ""))).slice(0, 5),
-    [strategyBacktests],
-  );
+  const recentBacktests = useMemo(() => {
+    const seen = new Set<string>();
+    return [...strategyBacktests]
+      .sort((left, right) => String(right.created_at ?? "").localeCompare(String(left.created_at ?? "")))
+      .filter((backtest) => {
+        const signature = [
+          backtest.start_date,
+          backtest.end_date,
+          backtest.initial_capital,
+          backtest.fee_rate ?? "",
+          backtest.slippage_rate ?? "",
+        ].join("|");
+        if (seen.has(signature)) return false;
+        seen.add(signature);
+        return true;
+      })
+      .slice(0, 6);
+  }, [strategyBacktests]);
   const { data: latestBacktestTrades = [] } = useBacktestTrades(displayedBacktest?.id);
   const wfRows = useMemo(() => walkforward.filter((item) => item.strategy_id === id), [id, walkforward]);
   const strategyRiskRule = useMemo(
@@ -89,6 +120,10 @@ export default function StrategyDetailPage() {
   const qualityGate = useMemo(() => evaluateQualityGates(displayedBacktest, wfRows, strategyRiskRule), [displayedBacktest, strategyRiskRule, wfRows]);
   const isPilotStrategy = (strategy?.tags ?? []).includes("pilot");
   const displayedBacktestMatchesInputs = Boolean(matchingBacktest);
+  const displayedBacktestMatchesStrategy = useMemo(() => {
+    if (!displayedBacktest?.strategy_params_snapshot) return true;
+    return stableStringify(displayedBacktest.strategy_params_snapshot) === stableStringify(strategy?.parameters ?? {});
+  }, [displayedBacktest?.strategy_params_snapshot, strategy?.parameters]);
 
   if (!strategy) return <div>Strategie nicht gefunden.</div>;
 
@@ -234,7 +269,7 @@ export default function StrategyDetailPage() {
               </div>
               <p className="text-sm text-slate-500">{strategy.symbol} | {strategy.timeframe} | {strategy.asset_class}</p>
             </div>
-            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:flex 2xl:flex-wrap">
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3 2xl:max-w-[58rem]">
               <Button variant="outline" onClick={() => void handleAnalyze()} disabled={analyzeMutation.isPending || busy}>
                 {analyzeMutation.isPending ? "Analysiere..." : "Agent analysieren"}
               </Button>
@@ -434,57 +469,60 @@ export default function StrategyDetailPage() {
                       }}
                     >
                       {backtest.start_date} → {backtest.end_date}
+                      {(backtest.fee_rate ?? null) !== null || (backtest.slippage_rate ?? null) !== null
+                        ? ` · fee ${formatNumber(backtest.fee_rate ?? 0, 4)} · slip ${formatNumber(backtest.slippage_rate ?? 0, 4)}`
+                        : ""}
                     </Button>
                   ))}
                 </div>
               </div>
             )}
 
-            <div className="grid grid-cols-2 gap-3 md:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-7">
-              <div className="min-h-24 rounded-xl bg-muted p-3">
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
+              <div className="min-h-24 rounded-xl bg-muted p-4">
                 <p className="text-xs uppercase tracking-wide text-slate-500">Return</p>
-                <p className="mt-1 text-2xl font-semibold">{formatPercent(displayedBacktest?.total_return)}</p>
+                <p className="mt-2 text-3xl font-semibold leading-none">{formatPercent(displayedBacktest?.total_return)}</p>
               </div>
-              <div className="min-h-24 rounded-xl bg-muted p-3">
+              <div className="min-h-24 rounded-xl bg-muted p-4">
                 <p className="text-xs uppercase tracking-wide text-slate-500">Sharpe</p>
-                <p className="mt-1 text-2xl font-semibold">{formatNumber(displayedBacktest?.sharpe_ratio)}</p>
+                <p className="mt-2 text-3xl font-semibold leading-none">{formatNumber(displayedBacktest?.sharpe_ratio)}</p>
               </div>
-              <div className="min-h-24 rounded-xl bg-muted p-3">
+              <div className="min-h-24 rounded-xl bg-muted p-4">
                 <p className="text-xs uppercase tracking-wide text-slate-500">Max DD</p>
-                <p className="mt-1 text-2xl font-semibold">{formatPercent(displayedBacktest?.max_drawdown)}</p>
+                <p className="mt-2 text-3xl font-semibold leading-none">{formatPercent(displayedBacktest?.max_drawdown)}</p>
               </div>
-              <div className="min-h-24 rounded-xl bg-muted p-3">
+              <div className="min-h-24 rounded-xl bg-muted p-4">
                 <p className="text-xs uppercase tracking-wide text-slate-500">Win Rate</p>
-                <p className="mt-1 text-2xl font-semibold">{formatPercent(displayedBacktest?.win_rate)}</p>
+                <p className="mt-2 text-3xl font-semibold leading-none">{formatPercent(displayedBacktest?.win_rate)}</p>
               </div>
-              <div className="min-h-24 rounded-xl bg-muted p-3">
+              <div className="min-h-24 rounded-xl bg-muted p-4">
                 <p className="text-xs uppercase tracking-wide text-slate-500">Trades</p>
-                <p className="mt-1 text-2xl font-semibold">{formatNumber(displayedBacktest?.total_trades, 0)}</p>
+                <p className="mt-2 text-3xl font-semibold leading-none">{formatNumber(displayedBacktest?.total_trades, 0)}</p>
               </div>
-              <div className="min-h-24 rounded-xl bg-muted p-3">
+              <div className="min-h-24 rounded-xl bg-muted p-4">
                 <p className="text-xs uppercase tracking-wide text-slate-500">Gewinner</p>
-                <p className="mt-1 text-2xl font-semibold">{formatNumber(displayedBacktest?.winning_trades, 0)}</p>
+                <p className="mt-2 text-3xl font-semibold leading-none">{formatNumber(displayedBacktest?.winning_trades, 0)}</p>
               </div>
-              <div className="min-h-24 rounded-xl bg-muted p-3">
+              <div className="min-h-24 rounded-xl bg-muted p-4">
                 <p className="text-xs uppercase tracking-wide text-slate-500">Verlierer</p>
-                <p className="mt-1 text-2xl font-semibold">{formatNumber(displayedBacktest?.losing_trades, 0)}</p>
+                <p className="mt-2 text-3xl font-semibold leading-none">{formatNumber(displayedBacktest?.losing_trades, 0)}</p>
               </div>
             </div>
 
             <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-              <div className="min-h-24 rounded-xl border border-border/60 p-3">
+              <div className="min-h-24 rounded-xl border border-border/60 p-4">
                 <p className="text-xs uppercase tracking-wide text-slate-500">Angezeigter Run</p>
                 <p className="mt-1 text-sm font-medium">{formatDateTime(displayedBacktest?.created_at)}</p>
               </div>
-              <div className="min-h-24 rounded-xl border border-border/60 p-3">
+              <div className="min-h-24 rounded-xl border border-border/60 p-4">
                 <p className="text-xs uppercase tracking-wide text-slate-500">Final Capital</p>
                 <p className="mt-1 text-sm font-medium">{formatCurrency(displayedBacktest?.final_capital)}</p>
               </div>
-              <div className="min-h-24 rounded-xl border border-border/60 p-3">
+              <div className="min-h-24 rounded-xl border border-border/60 p-4">
                 <p className="text-xs uppercase tracking-wide text-slate-500">Profit Factor</p>
                 <p className="mt-1 text-sm font-medium">{formatNumber(displayedBacktest?.profit_factor)}</p>
               </div>
-              <div className="min-h-24 rounded-xl border border-border/60 p-3">
+              <div className="min-h-24 rounded-xl border border-border/60 p-4">
                 <p className="text-xs uppercase tracking-wide text-slate-500">Ø Haltedauer</p>
                 <p className="mt-1 text-sm font-medium">{displayedBacktest?.avg_trade_duration ?? "-"}</p>
               </div>
@@ -494,6 +532,12 @@ export default function StrategyDetailPage() {
               <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-700">
                 Angezeigt wird aktuell der letzte gespeicherte Backtest vom {formatDateTime(latestBacktest.created_at)}.
                 Er gehoert zu {latestBacktest.start_date} bis {latestBacktest.end_date} bei Kapital {formatCurrency(latestBacktest.initial_capital)} und passt damit nicht vollstaendig zu den aktuell eingestellten Eingaben oben.
+              </div>
+            )}
+
+            {displayedBacktest && !displayedBacktestMatchesStrategy && (
+              <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-700">
+                Der angezeigte Backtest wurde mit einem aelteren Strategie-Parameterstand gespeichert. Fuer einen fairen Vergleich solltest du einen neuen Backtest mit dem aktuellen Strategiestand laufen lassen.
               </div>
             )}
 

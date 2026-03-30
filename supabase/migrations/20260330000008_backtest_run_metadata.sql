@@ -1,0 +1,4 @@
+ALTER TABLE backtests
+ADD COLUMN IF NOT EXISTS fee_rate NUMERIC,
+ADD COLUMN IF NOT EXISTS slippage_rate NUMERIC,
+ADD COLUMN IF NOT EXISTS strategy_params_snapshot JSONB DEFAULT '{}'::jsonb;

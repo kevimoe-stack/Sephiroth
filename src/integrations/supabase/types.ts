@@ -24,6 +24,9 @@ export interface Backtest {
   start_date: string;
   end_date: string;
   initial_capital: number;
+  fee_rate: number | null;
+  slippage_rate: number | null;
+  strategy_params_snapshot: Record<string, Json> | null;
   final_capital: number | null;
   total_return: number | null;
   cagr: number | null;

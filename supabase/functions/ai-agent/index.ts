@@ -176,19 +176,54 @@ function buildOptimization(strategy: StrategyRow, gateReasons: string[], operati
   }
 
   if (name.includes("macd")) {
-    const parameterPatch: OptimizationPlan["parameterPatch"] = { fastPeriod: 10, slowPeriod: 24, signalPeriod: 6, confirmationEma: 100 };
-    if (gateReasons.includes("Profit Factor zu schwach")) parameterPatch.takeProfitPercent = 3.2;
-    if (needsRiskTightening) parameterPatch.stopLossPercent = 1.9;
-    if (needsStability) parameterPatch.confirmationBars = 2;
+    const parameterPatch: OptimizationPlan["parameterPatch"] = {
+      fastPeriod: 12,
+      slowPeriod: 35,
+      signalPeriod: 9,
+      confirmationEma: 200,
+      confirmationBars: needsStability ? 3 : 2,
+      minHistogramPercent: needsStability ? 0.04 : 0.025,
+      minHoldBars: needsStability ? 4 : 3,
+      exitOnTrendLoss: true,
+    };
+    if (gateReasons.includes("Profit Factor zu schwach")) parameterPatch.takeProfitPercent = 4.8;
+    if (needsRiskTightening) parameterPatch.stopLossPercent = 2.0;
     return {
       objective: "Trendfolge entrauschen und Whipsaws reduzieren",
       parameterPatch,
       rationale: dedupe([
         ...rationale,
-        "Ein zusaetzlicher Trendfilter kann Chop-Phasen reduzieren und den Profit Factor stabilisieren.",
-        "Leicht langsamere MACD-Parameter helfen, impulsive Fehlsignale auszusortieren.",
+        "Ein strengerer Regimefilter und Histogramm-Bestaetigung sollen Chop-Phasen reduzieren.",
+        "Langsamere MACD-Parameter und Mindesthaltedauer helfen, impulsive Fehlsignale auszusortieren.",
       ]),
       nextExperiment: "Teste Multi-Timeframe-Bestaetigung mit 4h-Filter und 1h-Einstieg.",
+      variantLabel: needsRiskTightening ? "risk-tight" : needsStability ? "stability" : "balanced",
+    };
+  }
+
+  if (name.includes("pullback")) {
+    const parameterPatch: OptimizationPlan["parameterPatch"] = {
+      fastEma: 34,
+      slowEma: 144,
+      trendFilterEma: 200,
+      rsiPeriod: 12,
+      pullbackRsi: needsStability ? 40 : 42,
+      recoveryRsi: needsStability ? 55 : 53,
+      confirmationBars: needsStability ? 3 : 2,
+      maxPullbackPercent: needsRiskTightening ? 2.2 : 2.8,
+      minHoldBars: 3,
+    };
+    if (gateReasons.includes("Profit Factor zu schwach")) parameterPatch.takeProfitPercent = 5.6;
+    if (needsRiskTightening) parameterPatch.stopLossPercent = 1.6;
+    return {
+      objective: "Pullback-Einstiege strenger filtern und Trendstruktur staerken",
+      parameterPatch,
+      rationale: dedupe([
+        ...rationale,
+        "Kontrolliertere Pullbacks und mehr Trendbestaetigung sollen Drawdown und OOS-Noise senken.",
+        "Der Fokus liegt auf weniger, aber saubereren Wiedereinstiegen im uebergeordneten Trend.",
+      ]),
+      nextExperiment: "Vergleiche denselben Pullback-Ansatz auf 4h mit engerem Pullback-Abstand und laengerer Haltedauer.",
       variantLabel: needsRiskTightening ? "risk-tight" : needsStability ? "stability" : "balanced",
     };
   }

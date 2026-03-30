@@ -229,6 +229,8 @@ function createSignals(strategy: StrategyRow, candles: Candle[]) {
       const confirmationPeriod = Number(params.confirmationEma ?? 0);
       const confirmationBars = Math.max(1, Number(params.confirmationBars ?? 1));
       const confirmation = confirmationPeriod > 0 ? ema(closes, confirmationPeriod) : [];
+      const minHistogramPercent = Number(params.minHistogramPercent ?? 0);
+      const exitOnTrendLoss = Boolean(params.exitOnTrendLoss ?? true);
       const values = macd(
         closes,
         Number(params.fastPeriod ?? 12),
@@ -243,22 +245,34 @@ function createSignals(strategy: StrategyRow, candles: Candle[]) {
             Number.isFinite(confirmation[candidateIndex]) &&
             closes[candidateIndex] > confirmation[candidateIndex],
           );
+        const histogramPercent =
+          Number.isFinite(values.line[index]) && Number.isFinite(values.signal[index]) && closes[index] > 0
+            ? ((values.line[index] - values.signal[index]) / closes[index]) * 100
+            : Number.NaN;
         if (
           Number.isFinite(values.line[index - 1]) &&
           Number.isFinite(values.signal[index - 1]) &&
           values.line[index - 1] <= values.signal[index - 1] &&
           values.line[index] > values.signal[index] &&
           values.line[index] > 0 &&
-          trendConfirmed
+          trendConfirmed &&
+          (minHistogramPercent <= 0 || histogramPercent >= minHistogramPercent)
         ) {
           signals[index] = 1;
         }
+        const trendLost =
+          confirmationPeriod > 0 &&
+          Number.isFinite(confirmation[index]) &&
+          closes[index] < confirmation[index];
         if (
           Number.isFinite(values.line[index - 1]) &&
           Number.isFinite(values.signal[index - 1]) &&
           values.line[index - 1] >= values.signal[index - 1] &&
           values.line[index] < values.signal[index]
         ) {
+          signals[index] = -1;
+        }
+        if (signals[index] === 0 && exitOnTrendLoss && trendLost) {
           signals[index] = -1;
         }
       }
@@ -279,6 +293,7 @@ function createSignals(strategy: StrategyRow, candles: Candle[]) {
       const atrValues = atr(candles, Number(params.atrPeriod ?? 14));
       const atrThreshold = Number(params.atrFilter ?? 0);
       const confirmationBars = Math.max(1, Number(params.confirmationBars ?? 1));
+      const maxPullbackPercent = Number(params.maxPullbackPercent ?? 0);
 
       for (let index = 1; index < candles.length; index += 1) {
         const trendUp =
@@ -295,10 +310,13 @@ function createSignals(strategy: StrategyRow, candles: Candle[]) {
           Number.isFinite(rsiValues[index]) &&
           rsiValues[index - 1] <= pullbackRsi &&
           rsiValues[index] >= recoveryRsi;
+        const pullbackControlled =
+          maxPullbackPercent <= 0 ||
+          (Number.isFinite(fast[index]) && Math.abs((closes[index] - fast[index]) / fast[index]) * 100 <= maxPullbackPercent);
         const volatilityConfirmed =
           atrThreshold <= 0 ||
           (Number.isFinite(atrValues[index]) && atrValues[index] / closes[index] * 100 <= atrThreshold * 2.5);
-        if (trendUp && recoveringPullback && volatilityConfirmed) {
+        if (trendUp && recoveringPullback && pullbackControlled && volatilityConfirmed) {
           signals[index] = 1;
         }
 
@@ -570,9 +588,9 @@ export async function runWalkForwardEngine(
     const candidates =
       inferStrategyKind(strategy) === "trend-pullback"
         ? [
-            { fastEma: 34, slowEma: 144, trendFilterEma: 144, rsiPeriod: 12, pullbackRsi: 46, recoveryRsi: 54, exitRsi: 66 },
-            { fastEma: 50, slowEma: 200, trendFilterEma: 200, rsiPeriod: 14, pullbackRsi: 44, recoveryRsi: 52, exitRsi: 68 },
-            { fastEma: 55, slowEma: 233, trendFilterEma: 200, rsiPeriod: 14, pullbackRsi: 42, recoveryRsi: 50, exitRsi: 64 },
+            { fastEma: 34, slowEma: 144, trendFilterEma: 200, rsiPeriod: 12, pullbackRsi: 40, recoveryRsi: 54, exitRsi: 66, confirmationBars: 3, maxPullbackPercent: 2.2, minHoldBars: 3 },
+            { fastEma: 50, slowEma: 200, trendFilterEma: 200, rsiPeriod: 14, pullbackRsi: 44, recoveryRsi: 52, exitRsi: 68, confirmationBars: 2, maxPullbackPercent: 2.8, minHoldBars: 2 },
+            { fastEma: 55, slowEma: 233, trendFilterEma: 233, rsiPeriod: 14, pullbackRsi: 42, recoveryRsi: 50, exitRsi: 64, confirmationBars: 3, maxPullbackPercent: 2.0, minHoldBars: 4 },
           ]
         : inferStrategyKind(strategy) === "ema"
         ? [{ fast: 8, slow: 21 }, { fast: 12, slow: 26 }, { fast: 21, slow: 55 }]
@@ -580,7 +598,11 @@ export async function runWalkForwardEngine(
           ? [{ rsiPeriod: 10, oversold: 25, exitLevel: 52 }, { rsiPeriod: 14, oversold: 30, exitLevel: 55 }, { rsiPeriod: 21, oversold: 35, exitLevel: 58 }]
           : inferStrategyKind(strategy) === "bollinger"
             ? [{ period: 20, multiplier: 2 }, { period: 30, multiplier: 2 }, { period: 20, multiplier: 2.5 }]
-            : [{ fastPeriod: 8, slowPeriod: 21, signalPeriod: 5 }, { fastPeriod: 12, slowPeriod: 26, signalPeriod: 9 }, { fastPeriod: 16, slowPeriod: 34, signalPeriod: 9 }];
+            : [
+                { fastPeriod: 10, slowPeriod: 24, signalPeriod: 7, confirmationEma: 144, confirmationBars: 2, minHistogramPercent: 0.02, minHoldBars: 3, exitOnTrendLoss: true },
+                { fastPeriod: 12, slowPeriod: 35, signalPeriod: 9, confirmationEma: 200, confirmationBars: 3, minHistogramPercent: 0.035, minHoldBars: 4, exitOnTrendLoss: true },
+                { fastPeriod: 16, slowPeriod: 42, signalPeriod: 9, confirmationEma: 200, confirmationBars: 3, minHistogramPercent: 0.05, minHoldBars: 4, exitOnTrendLoss: true },
+              ];
 
     let bestCandidate = strategy.parameters ?? {};
     let bestInSample;
