@@ -390,7 +390,7 @@ export default function StrategyDetailPage() {
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-4 xl:grid-cols-4">
+            <div className="grid grid-cols-2 gap-4 xl:grid-cols-7">
               <div>
                 <p className="text-sm text-slate-500">Return</p>
                 <p className="text-xl font-semibold">{formatPercent(latestBacktest?.total_return)}</p>
@@ -406,6 +406,18 @@ export default function StrategyDetailPage() {
               <div>
                 <p className="text-sm text-slate-500">Win Rate</p>
                 <p className="text-xl font-semibold">{formatPercent(latestBacktest?.win_rate)}</p>
+              </div>
+              <div>
+                <p className="text-sm text-slate-500">Trades</p>
+                <p className="text-xl font-semibold">{formatNumber(latestBacktest?.total_trades, 0)}</p>
+              </div>
+              <div>
+                <p className="text-sm text-slate-500">Gewinner</p>
+                <p className="text-xl font-semibold">{formatNumber(latestBacktest?.winning_trades, 0)}</p>
+              </div>
+              <div>
+                <p className="text-sm text-slate-500">Verlierer</p>
+                <p className="text-xl font-semibold">{formatNumber(latestBacktest?.losing_trades, 0)}</p>
               </div>
             </div>
 
