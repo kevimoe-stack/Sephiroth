@@ -2,6 +2,7 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useStrategies, useWalkforwardResults } from "@/hooks/use-trading-data";
 import type { WalkforwardResult } from "@/integrations/supabase/types";
+import { getPilotComparison, getPilotRole, getResearchSnapshot } from "@/lib/analytics";
 import { formatDateTime, formatNumber } from "@/lib/utils";
 
 function groupRuns(rows: WalkforwardResult[]) {
@@ -41,20 +42,43 @@ function groupRuns(rows: WalkforwardResult[]) {
 export default function WalkForwardPage() {
   const { data: results = [] } = useWalkforwardResults();
   const { data: strategies = [] } = useStrategies();
-  const rows = groupRuns(results).map((run) => ({
-    ...run,
-    strategy: strategies.find((strategy) => strategy.id === run.strategy_id)?.name ?? run.strategy_id,
-  }));
+  const pilotComparison = getPilotComparison(strategies, [], results);
+  const rows = groupRuns(results).map((run) => {
+    const strategy = strategies.find((item) => item.id === run.strategy_id) ?? null;
+    return {
+      ...run,
+      strategy: strategy?.name ?? run.strategy_id,
+      strategyRow: strategy,
+    };
+  });
+  const visibleRows = rows.filter((row) => {
+    if (!row.strategyRow) return false;
+    const snapshot = getResearchSnapshot([], results, row.strategy_id);
+    const pilotRole = getPilotRole(row.strategy_id, pilotComparison);
+    return (
+      pilotRole === "focus" ||
+      row.strategyRow.is_champion ||
+      (row.strategyRow.tags ?? []).includes("pilot") ||
+      snapshot.status === "candidate-ready" ||
+      snapshot.status === "research-watch" ||
+      row.id === (snapshot.walkforwardRun[0]?.run_group_id ?? `${row.strategy_id}-${snapshot.walkforwardRun[0]?.created_at ?? ""}`)
+    );
+  });
+  const hiddenSecondaryRuns = Math.max(rows.length - visibleRows.length, 0);
 
   return (
     <div className="space-y-6">
       <Card>
         <CardHeader>
           <CardTitle>Walk-Forward Runs</CardTitle>
+          <div className="flex flex-wrap items-center gap-2 text-sm text-slate-500">
+            <span>{visibleRows.length} aktiv sichtbar</span>
+            {hiddenSecondaryRuns > 0 && <span>{hiddenSecondaryRuns} sekundaere Runs ausgeblendet</span>}
+          </div>
         </CardHeader>
         <CardContent className="h-[340px]">
           <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={rows}>
+            <BarChart data={visibleRows}>
               <CartesianGrid strokeDasharray="3 3" vertical={false} />
               <XAxis dataKey="strategy" hide />
               <YAxis />
@@ -66,7 +90,7 @@ export default function WalkForwardPage() {
         </CardContent>
       </Card>
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-        {rows.map((row) => (
+        {visibleRows.map((row) => (
           <Card key={row.id}>
             <CardHeader>
               <CardTitle>{row.strategy}</CardTitle>

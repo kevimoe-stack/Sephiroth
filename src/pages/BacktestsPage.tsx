@@ -3,11 +3,13 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useBacktests, useStrategies } from "@/hooks/use-trading-data";
+import { getPilotComparison, getPilotRole, getResearchSnapshot } from "@/lib/analytics";
 import { formatDateTime, formatNumber, formatPercent } from "@/lib/utils";
 
 export default function BacktestsPage() {
   const { data: backtests = [] } = useBacktests();
   const { data: strategies = [] } = useStrategies();
+  const pilotComparison = useMemo(() => getPilotComparison(strategies, backtests, []), [backtests, strategies]);
   const { rows, hiddenDuplicates, latestByStrategy } = useMemo(() => {
     const strategyMap = new Map(strategies.map((strategy) => [strategy.id, strategy]));
     const seen = new Set<string>();
@@ -53,6 +55,24 @@ export default function BacktestsPage() {
       latestByStrategy: Array.from(latestMap.values()),
     };
   }, [backtests, strategies]);
+  const visibleRows = useMemo(
+    () =>
+      rows.filter(({ backtest, strategy }) => {
+        if (!strategy) return false;
+        const snapshot = getResearchSnapshot(backtests, [], strategy.id);
+        const pilotRole = getPilotRole(strategy.id, pilotComparison);
+        return (
+          pilotRole === "focus" ||
+          strategy.is_champion ||
+          (strategy.tags ?? []).includes("pilot") ||
+          snapshot.status === "candidate-ready" ||
+          snapshot.status === "research-watch" ||
+          backtest.id === snapshot.backtest?.id
+        );
+      }),
+    [backtests, pilotComparison, rows],
+  );
+  const hiddenSecondaryRuns = Math.max(rows.length - visibleRows.length, 0);
 
   return (
     <div className="space-y-6">
@@ -83,6 +103,10 @@ export default function BacktestsPage() {
           <p className="text-sm text-slate-500">
             Identische Wiederholungsläufe werden zusammengefasst. Unterschiede in Zeitraum, Kapital, Fee oder Slippage bleiben sichtbar.
           </p>
+          <div className="flex flex-wrap items-center gap-2 text-sm text-slate-500">
+            <span>{visibleRows.length} aktiv sichtbar</span>
+            {hiddenSecondaryRuns > 0 && <span>{hiddenSecondaryRuns} sekundaere Runs ausgeblendet</span>}
+          </div>
         </CardHeader>
         <CardContent>
           <div className="overflow-x-auto">
@@ -103,7 +127,7 @@ export default function BacktestsPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {rows.map(({ backtest, strategy }) => (
+                {visibleRows.map(({ backtest, strategy }) => (
                   <TableRow key={backtest.id}>
                     <TableCell>{strategy?.name}</TableCell>
                     <TableCell>{formatDateTime(backtest.created_at)}</TableCell>
