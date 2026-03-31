@@ -13,6 +13,12 @@ import { computeStrategyPriority, getPilotComparison, getPilotRole, getResearchS
 import { buildPilotStrategySeeds } from "@/lib/strategy-presets";
 import { formatDateTime, formatNumber, formatPercent } from "@/lib/utils";
 
+function getParentStrategyId(strategy: { parameters?: Record<string, unknown> | null; id: string }) {
+  const parameters = (strategy.parameters ?? {}) as Record<string, unknown>;
+  const parentStrategyId = parameters.parentStrategyId;
+  return typeof parentStrategyId === "string" && parentStrategyId.length > 0 ? parentStrategyId : null;
+}
+
 export default function StrategiesPage() {
   const { data: strategies = [] } = useStrategies();
   const { data: backtests = [] } = useBacktests();
@@ -20,25 +26,67 @@ export default function StrategiesPage() {
   const createStrategy = useCreateStrategy();
   const [query, setQuery] = useState("");
   const [showVariants, setShowVariants] = useState(false);
+  const [showComparisonLine, setShowComparisonLine] = useState(false);
   const pilotNames = new Set(
     strategies.filter((strategy) => (strategy.tags ?? []).includes("pilot")).map((strategy) => strategy.name),
   );
   const missingPilotSeeds = buildPilotStrategySeeds().filter((seed) => !pilotNames.has(String(seed.name ?? "")));
   const pilotComparison = useMemo(() => getPilotComparison(strategies, backtests, walkforward), [backtests, strategies, walkforward]);
+  const comparisonStrategyIds = useMemo(
+    () =>
+      new Set(
+        strategies
+          .filter((strategy) => getPilotRole(strategy.id, pilotComparison) === "comparison")
+          .map((strategy) => strategy.id),
+      ),
+    [pilotComparison, strategies],
+  );
+  const comparisonVariantParentIds = useMemo(
+    () =>
+      new Set(
+        strategies
+          .filter((strategy) => {
+            const parentStrategyId = getParentStrategyId(strategy);
+            return parentStrategyId !== null && comparisonStrategyIds.has(parentStrategyId);
+          })
+          .map((strategy) => strategy.id),
+      ),
+    [comparisonStrategyIds, strategies],
+  );
   const filtered = useMemo(
     () =>
       strategies
         .filter((strategy) => {
           const matchesQuery = [strategy.name, strategy.symbol, ...(strategy.tags ?? [])].join(" ").toLowerCase().includes(query.toLowerCase());
           const isVariant = (strategy.tags ?? []).includes("agent-variant");
-          return matchesQuery && (showVariants || !isVariant);
+          const parentStrategyId = getParentStrategyId(strategy);
+          const pilotRole = getPilotRole(strategy.id, pilotComparison);
+          const belongsToComparisonLine =
+            pilotRole === "comparison" ||
+            comparisonVariantParentIds.has(strategy.id) ||
+            (parentStrategyId !== null && comparisonStrategyIds.has(parentStrategyId));
+
+          return matchesQuery && (showVariants || !isVariant) && (showComparisonLine || !belongsToComparisonLine);
         })
         .sort((left, right) => {
           const leftScore = computeStrategyPriority(left, backtests, walkforward, pilotComparison).priorityScore;
           const rightScore = computeStrategyPriority(right, backtests, walkforward, pilotComparison).priorityScore;
           return rightScore - leftScore || left.name.localeCompare(right.name);
         }),
-    [backtests, pilotComparison, query, showVariants, strategies, walkforward],
+    [backtests, comparisonStrategyIds, comparisonVariantParentIds, pilotComparison, query, showComparisonLine, showVariants, strategies, walkforward],
+  );
+  const visibleComparisonCount = useMemo(
+    () =>
+      filtered.filter((strategy) => {
+        const parentStrategyId = getParentStrategyId(strategy);
+        const pilotRole = getPilotRole(strategy.id, pilotComparison);
+        return (
+          pilotRole === "comparison" ||
+          comparisonVariantParentIds.has(strategy.id) ||
+          (parentStrategyId !== null && comparisonStrategyIds.has(parentStrategyId))
+        );
+      }).length,
+    [comparisonStrategyIds, comparisonVariantParentIds, filtered, pilotComparison],
   );
   const summary = useMemo(
     () => {
@@ -81,6 +129,9 @@ export default function StrategiesPage() {
         <div className="flex flex-wrap gap-3">
           <Button variant="outline" onClick={() => setShowVariants((current) => !current)}>
             {showVariants ? "Varianten ausblenden" : "Varianten einblenden"}
+          </Button>
+          <Button variant="outline" onClick={() => setShowComparisonLine((current) => !current)}>
+            {showComparisonLine ? "Vergleichslinie ausblenden" : "Vergleichslinie einblenden"}
           </Button>
           <Button variant="secondary" onClick={() => void handleCreatePilot()} disabled={createStrategy.isPending || missingPilotSeeds.length === 0}>
             {createStrategy.isPending ? "Lege Pilot an..." : missingPilotSeeds.length === 0 ? "Pilot-Pack vorhanden" : `Pilot-Pack anlegen (${missingPilotSeeds.length})`}
@@ -176,6 +227,19 @@ export default function StrategiesPage() {
                 </Link>
               ))}
             </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {!showComparisonLine && visibleComparisonCount === 0 && comparisonStrategyIds.size > 0 && (
+        <Card>
+          <CardContent className="flex flex-col gap-2 py-5 text-sm text-slate-600 md:flex-row md:items-center md:justify-between">
+            <p>
+              Die Vergleichslinie und ihre Varianten sind in der Hauptsicht aktuell ausgeblendet, damit die Fokusspur sauberer priorisiert bleibt.
+            </p>
+            <Button variant="outline" onClick={() => setShowComparisonLine(true)}>
+              Vergleichslinie anzeigen
+            </Button>
           </CardContent>
         </Card>
       )}
