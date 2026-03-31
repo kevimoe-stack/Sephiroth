@@ -28,6 +28,7 @@ export default function AgentPage() {
   const bulkMutation = useAgentBulkAnalyze();
   const [selectedStrategyId, setSelectedStrategyId] = useState("");
   const [showComparisonQueue, setShowComparisonQueue] = useState(false);
+  const [showRetiredQueue, setShowRetiredQueue] = useState(false);
 
   const healthRows = useMemo(
     () =>
@@ -113,9 +114,19 @@ export default function AgentPage() {
   }, [strategies, backtests, wf, riskRules, paperPortfolios, livePortfolios, liveOrders, pilotComparison]);
 
   const visibleCandidateRows = useMemo(
-    () => candidateRows.filter((row) => showComparisonQueue || row.parentPilotRole !== "comparison"),
-    [candidateRows, showComparisonQueue],
+    () =>
+      candidateRows.filter((row) => {
+        if (!showComparisonQueue && row.parentPilotRole === "comparison") return false;
+        if (!showRetiredQueue && row.queueStatus === "retired") return false;
+        return true;
+      }),
+    [candidateRows, showComparisonQueue, showRetiredQueue],
   );
+  const retiredCandidateCount = useMemo(
+    () => candidateRows.filter((row) => row.queueStatus === "retired").length,
+    [candidateRows],
+  );
+  const activeCandidateCount = Math.max(candidateRows.length - retiredCandidateCount, 0);
 
   return (
     <Tabs defaultValue="overview" className="space-y-4">
@@ -170,8 +181,10 @@ export default function AgentPage() {
             <CardTitle>Candidate Queue</CardTitle>
             <div className="flex flex-wrap items-center gap-2 text-sm text-slate-500">
               <span>{visibleCandidateRows.length} sichtbar</span>
+              <span>{activeCandidateCount} aktiv</span>
               <span>{candidateRows.filter((row) => row.parentPilotRole === "focus").length} Fokusspur</span>
               <span>{candidateRows.filter((row) => row.parentPilotRole === "comparison").length} Vergleichsspur</span>
+              <span>{retiredCandidateCount} retired</span>
               <Button
                 type="button"
                 variant="outline"
@@ -179,6 +192,14 @@ export default function AgentPage() {
                 onClick={() => setShowComparisonQueue((current) => !current)}
               >
                 {showComparisonQueue ? "Vergleichslinie ausblenden" : "Vergleichslinie anzeigen"}
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setShowRetiredQueue((current) => !current)}
+              >
+                {showRetiredQueue ? "Retired ausblenden" : "Retired anzeigen"}
               </Button>
             </div>
           </CardHeader>
