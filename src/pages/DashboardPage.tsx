@@ -5,6 +5,7 @@ import { StrategyRankingTable } from "@/components/dashboard/StrategyRankingTabl
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useBacktests, useLiveOrders, useLivePortfolios, usePaperPortfolios, useRiskRules, useStrategies, useWalkforwardResults } from "@/hooks/use-trading-data";
+import { getPilotComparison, getPilotRole, getResearchSnapshot } from "@/lib/analytics";
 import { buildTournamentBoard } from "@/lib/tournament";
 import { formatNumber, formatPercent } from "@/lib/utils";
 
@@ -16,12 +17,28 @@ export default function DashboardPage() {
   const { data: livePortfolios = [] } = useLivePortfolios();
   const { data: liveOrders = [] } = useLiveOrders();
   const { data: riskRules = [] } = useRiskRules();
-  const tournament = buildTournamentBoard(strategies, backtests, walkforward, riskRules, paperPortfolios, livePortfolios, liveOrders);
+  const pilotComparison = getPilotComparison(strategies, backtests, walkforward);
+  const dashboardStrategies = strategies.filter((strategy) => {
+    const snapshot = getResearchSnapshot(backtests, walkforward, strategy.id);
+    const pilotRole = getPilotRole(strategy.id, pilotComparison);
+    return (
+      pilotRole === "focus" ||
+      strategy.is_champion ||
+      (strategy.tags ?? []).includes("pilot") ||
+      (strategy.tags ?? []).includes("execution-watchlist") ||
+      (strategy.tags ?? []).includes("preferred-for-tournament") ||
+      snapshot.status === "candidate-ready" ||
+      snapshot.status === "research-watch"
+    );
+  });
+  const tournament = buildTournamentBoard(dashboardStrategies, backtests, walkforward, riskRules, paperPortfolios, livePortfolios, liveOrders);
   const champion = tournament.champion?.strategy ?? strategies.find((strategy) => strategy.is_champion);
   const championBacktest = tournament.champion?.backtest ?? backtests.find((backtest) => backtest.strategy_id === champion?.id);
   const bestSharpe = Math.max(...backtests.map((backtest) => backtest.sharpe_ratio ?? 0), 0);
-  const avgDrawdown = backtests.length ? backtests.reduce((sum, item) => sum + (item.max_drawdown ?? 0), 0) / backtests.length : 0;
-  const assetCounts = strategies.reduce<Record<string, number>>((acc, strategy) => {
+  const avgDrawdown = tournament.rows.length
+    ? tournament.rows.reduce((sum, item) => sum + (item.backtest?.max_drawdown ?? 0), 0) / tournament.rows.length
+    : 0;
+  const assetCounts = dashboardStrategies.reduce<Record<string, number>>((acc, strategy) => {
     acc[strategy.asset_class] = (acc[strategy.asset_class] ?? 0) + 1;
     return acc;
   }, {});
@@ -29,7 +46,7 @@ export default function DashboardPage() {
   return (
     <div className="space-y-8">
       <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <KpiCard title="Strategien" value={String(strategies.length)} subtitle="Aktive und Draft-Strategien" icon={Sigma} />
+        <KpiCard title="Aktive Strategien" value={String(dashboardStrategies.length)} subtitle="Fokusspur und relevante Kandidaten" icon={Sigma} />
         <KpiCard title="Bester Sharpe" value={formatNumber(bestSharpe)} subtitle="Ueber alle Backtests" icon={Activity} />
         <KpiCard title="Avg Max Drawdown" value={formatPercent(avgDrawdown)} subtitle="Gefiltert ohne eliminierte Strategien" icon={Percent} />
         <KpiCard title="Champion" value={champion?.name ?? "-"} subtitle={champion ? `Fitness ${formatNumber(tournament.champion?.fitnessScore ?? 0)}` : "Noch nicht gesetzt"} icon={Crown} />
@@ -83,7 +100,7 @@ export default function DashboardPage() {
       </section>
 
       <StrategyRankingTable
-        strategies={strategies}
+        strategies={dashboardStrategies}
         backtests={backtests}
         walkforward={walkforward}
         riskRules={riskRules}
