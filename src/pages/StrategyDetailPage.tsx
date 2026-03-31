@@ -20,7 +20,7 @@ import {
   useWalkforwardResults,
 } from "@/hooks/use-trading-data";
 import type { WalkforwardResult } from "@/integrations/supabase/types";
-import { getPilotComparison, getPilotRole, getValidationPipeline } from "@/lib/analytics";
+import { getPilotComparison, getPilotRole, getValidationPipeline, getValidationRecommendation } from "@/lib/analytics";
 import { evaluateQualityGates } from "@/lib/quality-gates";
 import { formatCurrency, formatDateTime, formatNumber, formatPercent } from "@/lib/utils";
 
@@ -183,6 +183,13 @@ export default function StrategyDetailPage() {
       strategy
         ? getValidationPipeline(strategy, displayedBacktest, wfRows, qualityGate.passed)
         : { stages: [], doneCount: 0, totalCount: 0 },
+    [displayedBacktest, qualityGate.passed, strategy, wfRows],
+  );
+  const validationRecommendation = useMemo(
+    () =>
+      strategy
+        ? getValidationRecommendation(strategy, displayedBacktest, wfRows, qualityGate.passed)
+        : null,
     [displayedBacktest, qualityGate.passed, strategy, wfRows],
   );
 
@@ -477,6 +484,12 @@ export default function StrategyDetailPage() {
                 {validationPipeline.doneCount >= 4 ? "Nahe an testnet-ready" : validationPipeline.doneCount >= 2 ? "Im Research-Block" : "Fruehe Validierung"}
               </Badge>
             </div>
+            {validationRecommendation && (
+              <div className={`rounded-xl p-4 text-sm ${validationRecommendation.priority === "high" ? "border border-amber-200 bg-amber-50 text-amber-900" : "border border-primary/20 bg-primary/5 text-slate-700"}`}>
+                <p className="font-medium">{validationRecommendation.title}</p>
+                <p className="mt-2">{validationRecommendation.detail}</p>
+              </div>
+            )}
             <div className="grid gap-3 lg:grid-cols-2">
               {validationPipeline.stages.map((stage) => (
                 <div key={stage.key} className="rounded-xl bg-muted p-4">

@@ -208,6 +208,12 @@ export interface ValidationStage {
   detail: string;
 }
 
+export interface ValidationRecommendation {
+  title: string;
+  detail: string;
+  priority: "high" | "medium";
+}
+
 export function getValidationPipeline(
   strategy: Strategy,
   backtest: Backtest | null,
@@ -282,6 +288,94 @@ export function getValidationPipeline(
     stages,
     doneCount: stages.filter((stage) => stage.state === "done").length,
     totalCount: stages.length,
+  };
+}
+
+export function getValidationRecommendation(
+  strategy: Strategy,
+  backtest: Backtest | null,
+  walkforwardRun: WalkforwardResult[],
+  qualityGatePassed: boolean,
+) : ValidationRecommendation {
+  const tags = strategy.tags ?? [];
+  const candidateReady = tags.includes("candidate-ready");
+  const executionWatchlist = tags.includes("execution-watchlist");
+  const totalTrades = backtest?.total_trades ?? 0;
+  const sharpe = backtest?.sharpe_ratio ?? 0;
+  const drawdown = Math.abs(backtest?.max_drawdown ?? 0);
+  const profitFactor = backtest?.profit_factor ?? 0;
+  const passRate =
+    walkforwardRun.length === 0
+      ? 0
+      : walkforwardRun.filter((row) => Boolean(row.passed)).length / walkforwardRun.length;
+
+  if (!backtest) {
+    return {
+      title: "Ersten echten Backtest ausführen",
+      detail: "Ohne frischen Backtest können wir weder das Quality Gate noch den Testnet-Pfad seriös bewerten.",
+      priority: "high",
+    };
+  }
+
+  if (walkforwardRun.length === 0) {
+    return {
+      title: "Walk-Forward vervollständigen",
+      detail: "Der Backtest ist vorhanden, aber ohne Walk-Forward fehlt noch die wichtigste Stabilitätsprüfung für candidate-ready.",
+      priority: "high",
+    };
+  }
+
+  if (!qualityGatePassed) {
+    if (drawdown > 18) {
+      return {
+        title: "Drawdown zuerst reduzieren",
+        detail: "Die aktuelle Linie scheitert vor allem am Risikoprofil. Nächste Varianten sollten engeren Stop, stärkeren Trendfilter oder weniger aggressive Entries nutzen.",
+        priority: "high",
+      };
+    }
+    if (sharpe < 1 || profitFactor < 1.15) {
+      return {
+        title: "Signalqualität steigern",
+        detail: "Sharpe und Profit Factor liegen noch zu niedrig. Die Fokuslinie braucht selektivere Entries und sauberere Exit-Regeln, bevor sie candidate-ready werden kann.",
+        priority: "high",
+      };
+    }
+    if (passRate < 0.55) {
+      return {
+        title: "Walk-Forward-Stabilität verbessern",
+        detail: "Die Strategie produziert einzelne brauchbare Phasen, ist aber über die OOS-Fenster noch zu unstet. Wir sollten eher Regimefilter und defensivere Varianten testen.",
+        priority: "high",
+      };
+    }
+    if (totalTrades < 25) {
+      return {
+        title: "Ausreichende Tradebasis aufbauen",
+        detail: "Die Linie braucht mehr valide Trades, damit die Research-Aussage belastbar wird. Dabei dürfen Sharpe und Drawdown nicht weiter leiden.",
+        priority: "medium",
+      };
+    }
+  }
+
+  if (!candidateReady) {
+    return {
+      title: "Candidate-ready absichern",
+      detail: "Das Gate ist näher dran, aber die Queue-Einordnung fehlt noch. Ein frischer Backtest-/Walk-Forward-Lauf mit denselben Eingaben sollte jetzt sauber übernommen werden.",
+      priority: "medium",
+    };
+  }
+
+  if (!executionWatchlist) {
+    return {
+      title: "Richtung Execution-Watchlist drücken",
+      detail: "Die Research-Basis ist da. Jetzt brauchen wir etwas stärkere operative Robustheit, damit die Linie den Testnet-Pfad glaubwürdig erreicht.",
+      priority: "medium",
+    };
+  }
+
+  return {
+    title: "Für Testnet-Dry-Run priorisieren",
+    detail: "Diese Linie ist aktuell der beste Kandidat für den nächsten kontrollierten Execution-Check im Testnet-Dry-Run.",
+    priority: "medium",
   };
 }
 
