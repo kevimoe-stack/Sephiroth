@@ -29,13 +29,28 @@ export default function AgentPage() {
   const [selectedStrategyId, setSelectedStrategyId] = useState("");
   const [showComparisonQueue, setShowComparisonQueue] = useState(false);
   const [showRetiredQueue, setShowRetiredQueue] = useState(false);
+  const [showComparisonOverview, setShowComparisonOverview] = useState(false);
+
+  const pilotComparison = useMemo(
+    () => getPilotComparison(strategies, backtests, wf),
+    [strategies, backtests, wf],
+  );
 
   const healthRows = useMemo(
     () =>
       strategies
-        .map((strategy) => ({ strategy, ...computeHealth(strategy, backtests, wf, paperPortfolios, livePortfolios, liveOrders) }))
-        .sort((left, right) => right.healthScore - left.healthScore),
-    [strategies, backtests, wf, paperPortfolios, livePortfolios, liveOrders],
+        .map((strategy) => ({
+          strategy,
+          pilotRole: getPilotRole(strategy.id, pilotComparison),
+          ...computeHealth(strategy, backtests, wf, paperPortfolios, livePortfolios, liveOrders),
+        }))
+        .sort((left, right) => {
+          const leftPriority = left.pilotRole === "focus" ? 2 : left.pilotRole === "comparison" ? 0 : 1;
+          const rightPriority = right.pilotRole === "focus" ? 2 : right.pilotRole === "comparison" ? 0 : 1;
+          if (rightPriority !== leftPriority) return rightPriority - leftPriority;
+          return right.healthScore - left.healthScore;
+        }),
+    [strategies, backtests, wf, paperPortfolios, livePortfolios, liveOrders, pilotComparison],
   );
 
   const portfolioRows = bulkMutation.data?.ranking ?? healthRows.map((row) => ({
@@ -45,10 +60,20 @@ export default function AgentPage() {
     readiness_score: row.readinessScore,
     latest_sharpe: row.backtest?.sharpe_ratio ?? 0,
   }));
+  const visibleOverviewRows = useMemo(
+    () => healthRows.filter((row) => showComparisonOverview || row.pilotRole !== "comparison").slice(0, 12),
+    [healthRows, showComparisonOverview],
+  );
 
-  const pilotComparison = useMemo(
-    () => getPilotComparison(strategies, backtests, wf),
-    [strategies, backtests, wf],
+  const visiblePortfolioRows = useMemo(
+    () =>
+      portfolioRows
+        .filter((row: any) => {
+          const pilotRole = getPilotRole(row.strategy_id, pilotComparison);
+          return showComparisonOverview || pilotRole !== "comparison";
+        })
+        .slice(0, 12),
+    [pilotComparison, portfolioRows, showComparisonOverview],
   );
 
   const selectedStrategy = strategies.find((strategy) => strategy.id === selectedStrategyId) ?? pilotComparison.leader?.strategy ?? healthRows[0]?.strategy ?? null;
@@ -138,10 +163,22 @@ export default function AgentPage() {
         <TabsTrigger value="optimize">Optimize</TabsTrigger>
       </TabsList>
       <TabsContent value="overview" className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-        {healthRows.map(({ strategy, healthScore, readinessScore, passRate, operationalScore, operationalReadiness }) => (
+        <div className="md:col-span-2 xl:col-span-3 flex flex-wrap items-center gap-2 text-sm text-slate-500">
+          <span>{visibleOverviewRows.length} sichtbar</span>
+          <span>{healthRows.filter((row) => row.pilotRole === "focus").length} Fokusspur</span>
+          <span>{healthRows.filter((row) => row.pilotRole === "comparison").length} Vergleichsspur</span>
+          <Button type="button" variant="outline" size="sm" onClick={() => setShowComparisonOverview((current) => !current)}>
+            {showComparisonOverview ? "Vergleichslinie ausblenden" : "Vergleichslinie anzeigen"}
+          </Button>
+        </div>
+        {visibleOverviewRows.map(({ strategy, healthScore, readinessScore, passRate, operationalScore, operationalReadiness, pilotRole }) => (
           <Card key={strategy.id}>
             <CardHeader><CardTitle>{strategy.name}</CardTitle></CardHeader>
             <CardContent className="space-y-2 text-sm text-slate-500">
+              <div className="flex flex-wrap gap-2">
+                {pilotRole === "focus" && <span className="text-indigo-600">Pilot-Fokus</span>}
+                {pilotRole === "comparison" && <span className="text-slate-500">Vergleichslinie</span>}
+              </div>
               <p>Health Score: <span className="font-semibold text-foreground">{formatNumber(healthScore)}</span></p>
               <p>Readiness: <span className="font-semibold text-foreground">{formatNumber(readinessScore)}</span></p>
               <p>Operational Score: <span className="font-semibold text-foreground">{operationalScore === null ? "-" : formatNumber(operationalScore)}</span></p>
@@ -161,8 +198,13 @@ export default function AgentPage() {
               </Button>
               <Button variant="outline" onClick={() => bulkMutation.reset()}>Ansicht leeren</Button>
             </div>
+            <div className="flex flex-wrap items-center gap-2 text-sm text-slate-500">
+              <span>{visiblePortfolioRows.length} sichtbar</span>
+              <span>{portfolioRows.filter((row: any) => getPilotRole(row.strategy_id, pilotComparison) === "focus").length} Fokusspur</span>
+              <span>{portfolioRows.filter((row: any) => getPilotRole(row.strategy_id, pilotComparison) === "comparison").length} Vergleichsspur</span>
+            </div>
             <div className="space-y-3 text-sm text-slate-500">
-              {portfolioRows.map((row: any) => (
+              {visiblePortfolioRows.map((row: any) => (
                 <div key={row.strategy_id} className="rounded-xl bg-muted p-4">
                   <div className="flex items-center justify-between gap-3">
                     <span className="font-medium text-foreground">{row.strategy_name}</span>
