@@ -93,9 +93,28 @@ export default function StrategiesPage() {
     [filtered, pilotComparison],
   );
   const secondaryStrategies = useMemo(
-    () => filtered.filter((strategy) => getPilotRole(strategy.id, pilotComparison) !== "focus"),
-    [filtered, pilotComparison],
+    () =>
+      filtered.filter((strategy) => {
+        if (getPilotRole(strategy.id, pilotComparison) === "focus") return false;
+
+        const tags = strategy.tags ?? [];
+        const snapshot = getResearchSnapshot(backtests, walkforward, strategy.id);
+        const isChampion = strategy.is_champion;
+        const isPilot = tags.includes("pilot");
+        const isReady =
+          snapshot.status === "candidate-ready" ||
+          tags.includes("execution-watchlist") ||
+          tags.includes("preferred-for-tournament");
+        const isStaleWeakVariant =
+          tags.includes("agent-variant") &&
+          (snapshot.status === "needs-improvement" || snapshot.status === "stale" || tags.includes("retired-variant"));
+
+        if (isStaleWeakVariant) return false;
+        return isChampion || isPilot || isReady;
+      }),
+    [backtests, filtered, pilotComparison, walkforward],
   );
+  const hiddenSecondaryCount = Math.max(filtered.length - focusStrategies.length - secondaryStrategies.length, 0);
   const summary = useMemo(
     () => {
       const snapshots = strategies.map((strategy) => getResearchSnapshot(backtests, walkforward, strategy.id));
@@ -344,7 +363,10 @@ export default function StrategiesPage() {
             <h2 className="text-lg font-semibold text-slate-900">Weitere Strategien</h2>
             <p className="text-sm text-slate-500">Vergleichslinien, Champions und sonstige Research-Pfade außerhalb der aktiven Fokusspur.</p>
           </div>
-          <Badge variant="secondary">{secondaryStrategies.length} sichtbar</Badge>
+          <div className="flex flex-wrap items-center gap-2">
+            {hiddenSecondaryCount > 0 && <Badge variant="outline">{hiddenSecondaryCount} ausgeblendet</Badge>}
+            <Badge variant="secondary">{secondaryStrategies.length} sichtbar</Badge>
+          </div>
         </div>
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {secondaryStrategies.map((strategy) => (
