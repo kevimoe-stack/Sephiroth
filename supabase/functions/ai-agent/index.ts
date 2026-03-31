@@ -12,6 +12,7 @@ type StrategyRow = Record<string, unknown> & {
   parameters?: Record<string, unknown> | null;
   tags?: string[] | null;
   status?: string;
+  created_at?: string | null;
 };
 
 type OptimizationPlan = {
@@ -51,6 +52,34 @@ function sanitizeParentTags(tags: string[]) {
     "retired-variant",
     "optimizer-paused",
   ].includes(tag));
+}
+
+function isFreshEnough(createdAt: unknown, maxHours: number) {
+  const parsed = Date.parse(String(createdAt ?? ""));
+  if (Number.isNaN(parsed)) return false;
+  return Date.now() - parsed < maxHours * 60 * 60 * 1000;
+}
+
+function findReusableVariant(
+  strategies: StrategyRow[],
+  parentStrategyId: string,
+  variantLabel: string,
+  timeframe: string,
+  maxHours = 72,
+) {
+  return strategies.find((strategy) => {
+    const tags = Array.isArray(strategy.tags) ? strategy.tags : [];
+    if (!tags.includes("agent-variant")) return false;
+    if (strategy.status === "archived" || strategy.status === "eliminated") return false;
+    if (!isFreshEnough(strategy.created_at, maxHours)) return false;
+    const parameters = strategy.parameters;
+    if (!parameters || typeof parameters !== "object" || Array.isArray(parameters)) return false;
+    return (
+      String(parameters.parentStrategyId ?? "") === parentStrategyId &&
+      String(parameters.variantLabel ?? "") === variantLabel &&
+      String(strategy.timeframe ?? "") === timeframe
+    );
+  }) ?? null;
 }
 
 function computeOperationalFeedback(
@@ -407,6 +436,7 @@ Deno.serve(async (req) => {
 
     const { data: strategy, error: strategyError } = await supabase.from("strategies").select("*").eq("id", strategyId).single();
     if (strategyError || !strategy) throw strategyError ?? new Error("Strategy not found.");
+    const { data: allStrategies } = await supabase.from("strategies").select("*").neq("status", "eliminated");
 
     const { data: backtests } = await supabase.from("backtests").select("*").eq("strategy_id", strategy.id).order("created_at", { ascending: false }).limit(1);
     const { data: wf } = await supabase.from("walkforward_results").select("*").eq("strategy_id", strategy.id);
@@ -441,6 +471,26 @@ Deno.serve(async (req) => {
 
     if (action === "create-variant") {
       const payload = buildVariantPayload(strategy as StrategyRow, optimization, qualityGate.reasons, operational);
+      const reusableVariant = findReusableVariant(
+        (allStrategies ?? []) as StrategyRow[],
+        strategy.id,
+        String(payload.parameters?.variantLabel ?? "balanced"),
+        String(payload.timeframe ?? strategy.timeframe ?? "4h"),
+      );
+      if (reusableVariant) {
+        return Response.json(
+          {
+            ok: true,
+            strategy: { id: strategy.id, name: strategy.name, symbol: strategy.symbol },
+            optimization,
+            qualityGate,
+            operational,
+            variant: reusableVariant,
+            reused: true,
+          },
+          { headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
       const { data: variant, error: variantError } = await supabase.from("strategies").insert(payload).select("*").single();
       if (variantError || !variant) throw variantError ?? new Error("Variant creation failed.");
 
@@ -460,8 +510,27 @@ Deno.serve(async (req) => {
     if (action === "create-variant-pack") {
       const plans = buildVariantPlans(strategy as StrategyRow, optimization, qualityGate.reasons, operational);
       const payloads = plans.map((plan, index) => buildVariantPayload(strategy as StrategyRow, plan, qualityGate.reasons, operational, index));
-      const { data: variants, error: variantsError } = await supabase.from("strategies").insert(payloads).select("*");
-      if (variantsError || !variants) throw variantsError ?? new Error("Variant pack creation failed.");
+      const reusableVariants = payloads
+        .map((payload) =>
+          findReusableVariant(
+            (allStrategies ?? []) as StrategyRow[],
+            strategy.id,
+            String(payload.parameters?.variantLabel ?? "balanced"),
+            String(payload.timeframe ?? strategy.timeframe ?? "4h"),
+          ),
+        )
+        .filter(Boolean) as StrategyRow[];
+      const reusableLabels = new Set(
+        reusableVariants.map((variant) => String((variant.parameters as Record<string, unknown> | null)?.variantLabel ?? "")),
+      );
+      const newPayloads = payloads.filter((payload) => !reusableLabels.has(String(payload.parameters?.variantLabel ?? "")));
+
+      let insertedVariants: StrategyRow[] = [];
+      if (newPayloads.length > 0) {
+        const { data: variants, error: variantsError } = await supabase.from("strategies").insert(newPayloads).select("*");
+        if (variantsError || !variants) throw variantsError ?? new Error("Variant pack creation failed.");
+        insertedVariants = variants as StrategyRow[];
+      }
 
       return Response.json(
         {
@@ -470,7 +539,8 @@ Deno.serve(async (req) => {
           optimization,
           qualityGate,
           operational,
-          variants,
+          variants: [...reusableVariants, ...insertedVariants],
+          reused: reusableVariants.length,
         },
         { headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
