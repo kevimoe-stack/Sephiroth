@@ -88,6 +88,14 @@ export default function StrategiesPage() {
       }).length,
     [comparisonStrategyIds, comparisonVariantParentIds, filtered, pilotComparison],
   );
+  const focusStrategies = useMemo(
+    () => filtered.filter((strategy) => getPilotRole(strategy.id, pilotComparison) === "focus"),
+    [filtered, pilotComparison],
+  );
+  const secondaryStrategies = useMemo(
+    () => filtered.filter((strategy) => getPilotRole(strategy.id, pilotComparison) !== "focus"),
+    [filtered, pilotComparison],
+  );
   const summary = useMemo(
     () => {
       const snapshots = strategies.map((strategy) => getResearchSnapshot(backtests, walkforward, strategy.id));
@@ -246,8 +254,100 @@ export default function StrategiesPage() {
 
       <BulkOperationsDialog />
 
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-        {filtered.map((strategy) => (
+      {focusStrategies.length > 0 && (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <h2 className="text-lg font-semibold text-slate-900">Fokusspur</h2>
+              <p className="text-sm text-slate-500">Diese Strategien priorisiert Sephiroth aktuell für Research, Optimizer und spätere Execution-Pfade.</p>
+            </div>
+            <Badge variant="success">{focusStrategies.length} aktiv</Badge>
+          </div>
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+            {focusStrategies.map((strategy) => (
+              <Link key={strategy.id} to={`/strategies/${strategy.id}`}>
+                <Card className={[
+                  strategy.is_champion ? "border-success/40 ring-1 ring-success/30" : "",
+                ].filter(Boolean).join(" ") || undefined}>
+                  <CardHeader>
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <CardTitle>{strategy.name}</CardTitle>
+                        <p className="mt-1 text-sm text-slate-500">{strategy.symbol} | {strategy.timeframe}</p>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        {strategy.is_champion && <Badge variant="success">Champion</Badge>}
+                        {(strategy.tags ?? []).includes("pilot") && <Badge variant="secondary">Pilot</Badge>}
+                        <Badge variant="success">Pilot-Fokus</Badge>
+                        {(() => {
+                          const snapshot = getResearchSnapshot(backtests, walkforward, strategy.id);
+                          const variantMap: Record<string, "outline" | "secondary" | "destructive" | "success"> = {
+                            "candidate-ready": "success",
+                            "research-watch": "secondary",
+                            "backtest-only": "outline",
+                            stale: "outline",
+                            "needs-improvement": "destructive",
+                            "no-runs": "outline",
+                          };
+                          return <Badge variant={variantMap[snapshot.status]}>{snapshot.label}</Badge>;
+                        })()}
+                      </div>
+                    </div>
+                  </CardHeader>
+                  <CardContent className="space-y-4 text-sm text-slate-500">
+                    <p>{strategy.description}</p>
+                    {(() => {
+                      const snapshot = getResearchSnapshot(backtests, walkforward, strategy.id);
+                      const { backtest, walkforwardRun, passRate } = snapshot;
+
+                      if (!backtest && walkforwardRun.length === 0) return null;
+
+                      return (
+                        <div className="space-y-3 rounded-xl bg-success/5 p-3">
+                          <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500">
+                            <span>Letzter Research-Stand</span>
+                            <span>{formatDateTime(walkforwardRun[0]?.created_at ?? backtest?.created_at)}</span>
+                          </div>
+                          <div className="grid gap-3 sm:grid-cols-2">
+                            <div className="space-y-1">
+                              <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Research Snapshot</p>
+                              <p>Return {formatPercent(backtest?.total_return)}</p>
+                              <p>Sharpe {formatNumber(backtest?.sharpe_ratio)}</p>
+                              <p>Max DD {formatPercent(backtest?.max_drawdown)}</p>
+                              <p>Trades {formatNumber(backtest?.total_trades, 0)}</p>
+                            </div>
+                            <div className="space-y-1">
+                              <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Walk-Forward</p>
+                              <p>Fenster {walkforwardRun.length > 0 ? walkforwardRun.length : "-"}</p>
+                              <p>Passrate {passRate === null ? "-" : `${formatNumber(passRate * 100, 0)}%`}</p>
+                              <p>Fee / Slip {backtest ? `${formatNumber(backtest.fee_rate, 4)} / ${formatNumber(backtest.slippage_rate, 4)}` : "-"}</p>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })()}
+                    <div className="flex flex-wrap gap-2">
+                      <Badge variant="secondary">{strategy.status}</Badge>
+                      {(strategy.tags ?? []).slice(0, 8).map((tag) => <Badge key={tag} variant="outline">{tag}</Badge>)}
+                    </div>
+                  </CardContent>
+                </Card>
+              </Link>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="space-y-4">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h2 className="text-lg font-semibold text-slate-900">Weitere Strategien</h2>
+            <p className="text-sm text-slate-500">Vergleichslinien, Champions und sonstige Research-Pfade außerhalb der aktiven Fokusspur.</p>
+          </div>
+          <Badge variant="secondary">{secondaryStrategies.length} sichtbar</Badge>
+        </div>
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+        {secondaryStrategies.map((strategy) => (
           <Link key={strategy.id} to={`/strategies/${strategy.id}`}>
             <Card className={[
               strategy.is_champion ? "border-success/40 ring-1 ring-success/30" : "",
@@ -328,6 +428,7 @@ export default function StrategiesPage() {
             </Card>
           </Link>
         ))}
+        </div>
       </div>
     </div>
   );
