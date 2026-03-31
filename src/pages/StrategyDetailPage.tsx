@@ -20,7 +20,7 @@ import {
   useWalkforwardResults,
 } from "@/hooks/use-trading-data";
 import type { WalkforwardResult } from "@/integrations/supabase/types";
-import { getPilotComparison, getPilotRole } from "@/lib/analytics";
+import { getPilotComparison, getPilotRole, getValidationPipeline } from "@/lib/analytics";
 import { evaluateQualityGates } from "@/lib/quality-gates";
 import { formatCurrency, formatDateTime, formatNumber, formatPercent } from "@/lib/utils";
 
@@ -178,6 +178,13 @@ export default function StrategyDetailPage() {
   }, [backtests, isPilotStrategy, strategies, strategy, walkforward]);
   const pilotRole = getPilotRole(strategy?.id ?? "", pilotComparison);
   const comparisonPilotLimited = pilotRole === "comparison";
+  const validationPipeline = useMemo(
+    () =>
+      strategy
+        ? getValidationPipeline(strategy, displayedBacktest, wfRows, qualityGate.passed)
+        : { stages: [], doneCount: 0, totalCount: 0 },
+    [displayedBacktest, qualityGate.passed, strategy, wfRows],
+  );
 
   if (!strategy) return <div>Strategie nicht gefunden.</div>;
 
@@ -438,6 +445,61 @@ export default function StrategyDetailPage() {
                 Diese Pilotstrategie ist als sauberer Referenzkandidat gedacht: 4h, laengerer Testzeitraum und mehr Walk-Forward-Fenster statt aggressiver 1h-Optimierung.
               </div>
             )}
+            <div className="rounded-xl bg-muted p-4">
+              <p className="font-medium">Status {qualityGate.passed ? "freigegeben" : "blockiert"}</p>
+              <p className="mt-2 text-slate-500">
+                Trades min {qualityGate.thresholds.minTrades} | Sharpe min {qualityGate.thresholds.minSharpe} | Profit Factor min {qualityGate.thresholds.minProfitFactor}
+              </p>
+              <p className="text-slate-500">
+                Max DD {formatPercent(qualityGate.thresholds.maxDrawdown)} | Passrate min {formatPercent(qualityGate.thresholds.minPassRate)}
+              </p>
+            </div>
+            {qualityGate.reasons.length === 0 ? (
+              <p className="text-emerald-600">Die Strategie besteht aktuell alle Mindestanforderungen.</p>
+            ) : (
+              <div className="space-y-2">
+                {qualityGate.reasons.map((reason) => (
+                  <p key={reason} className="text-red-500">{reason}</p>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card className="xl:col-span-2">
+          <CardHeader>
+            <CardTitle>Testing-Fortschritt</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-2 text-sm text-slate-500">
+              <span>{validationPipeline.doneCount} von {validationPipeline.totalCount} Stufen geschafft</span>
+              <Badge variant={validationPipeline.doneCount >= 4 ? "success" : validationPipeline.doneCount >= 2 ? "secondary" : "warning"}>
+                {validationPipeline.doneCount >= 4 ? "Nahe an testnet-ready" : validationPipeline.doneCount >= 2 ? "Im Research-Block" : "Fruehe Validierung"}
+              </Badge>
+            </div>
+            <div className="grid gap-3 lg:grid-cols-2">
+              {validationPipeline.stages.map((stage) => (
+                <div key={stage.key} className="rounded-xl bg-muted p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="font-medium">{stage.label}</p>
+                    <Badge variant={stage.state === "done" ? "success" : stage.state === "active" ? "secondary" : "outline"}>
+                      {stage.state === "done" ? "ok" : stage.state === "active" ? "offen" : "gesperrt"}
+                    </Badge>
+                  </div>
+                  <p className="mt-2 text-sm text-slate-500">{stage.detail}</p>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      <div className="grid gap-6 xl:grid-cols-3">
+        <Card className="xl:col-span-1">
+          <CardHeader>
+            <CardTitle>Quality Gate Details</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4 text-sm">
             <div className="rounded-xl bg-muted p-4">
               <p className="font-medium">Status {qualityGate.passed ? "freigegeben" : "blockiert"}</p>
               <p className="mt-2 text-slate-500">

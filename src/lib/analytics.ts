@@ -199,6 +199,92 @@ export function computeStrategyPriority(
   };
 }
 
+export type ValidationStageState = "done" | "active" | "blocked";
+
+export interface ValidationStage {
+  key: string;
+  label: string;
+  state: ValidationStageState;
+  detail: string;
+}
+
+export function getValidationPipeline(
+  strategy: Strategy,
+  backtest: Backtest | null,
+  walkforwardRun: WalkforwardResult[],
+  qualityGatePassed: boolean,
+) {
+  const tags = strategy.tags ?? [];
+  const candidateReady = tags.includes("candidate-ready");
+  const executionWatchlist = tags.includes("execution-watchlist");
+  const preferredForTournament = tags.includes("preferred-for-tournament");
+  const retiredVariant = tags.includes("retired-variant");
+
+  const stages: ValidationStage[] = [
+    {
+      key: "backtest",
+      label: "Backtest",
+      state: backtest ? "done" : "active",
+      detail: backtest
+        ? `${backtest.total_trades ?? 0} Trades, Sharpe ${backtest.sharpe_ratio ?? 0}`
+        : "Erster echter Backtest fehlt noch.",
+    },
+    {
+      key: "walkforward",
+      label: "Walk-Forward",
+      state: walkforwardRun.length > 0 ? "done" : backtest ? "active" : "blocked",
+      detail:
+        walkforwardRun.length > 0
+          ? `${walkforwardRun.filter((row) => Boolean(row.passed)).length}/${walkforwardRun.length} Fenster bestanden`
+          : backtest
+            ? "Backtest vorhanden, Walk-Forward noch offen."
+            : "Backtest zuerst abschliessen.",
+    },
+    {
+      key: "quality-gate",
+      label: "Quality Gate",
+      state: qualityGatePassed ? "done" : walkforwardRun.length > 0 ? "active" : "blocked",
+      detail: qualityGatePassed
+        ? "Alle Mindestanforderungen aktuell erfuellt."
+        : walkforwardRun.length > 0
+          ? "Runs vorhanden, aber Gate noch nicht bestanden."
+          : "Ohne Walk-Forward noch nicht beurteilbar.",
+    },
+    {
+      key: "candidate",
+      label: "Candidate Queue",
+      state: candidateReady || executionWatchlist ? "done" : qualityGatePassed ? "active" : "blocked",
+      detail: executionWatchlist
+        ? "Execution-Watchlist erreicht."
+        : candidateReady
+          ? preferredForTournament
+            ? "Candidate-ready und fuer Tournament bevorzugt."
+            : "Candidate-ready."
+          : retiredVariant
+            ? "Variante wurde aus der automatischen Schleife genommen."
+            : qualityGatePassed
+              ? "Gate bestanden, wartet aber noch auf stärkere Queue-Einordnung."
+              : "Vorher muss das Quality Gate bestehen.",
+    },
+    {
+      key: "testnet",
+      label: "Testnet-Pfad",
+      state: executionWatchlist ? "done" : candidateReady ? "active" : "blocked",
+      detail: executionWatchlist
+        ? "Naechster sinnvoller Kandidat fuer Execution/Testnet-Checks."
+        : candidateReady
+          ? "Research-seitig nah dran, braucht aber noch mehr operative Sicherheit."
+          : "Noch nicht bereit fuer den Testnet-Pfad.",
+    },
+  ];
+
+  return {
+    stages,
+    doneCount: stages.filter((stage) => stage.state === "done").length,
+    totalCount: stages.length,
+  };
+}
+
 function clampScore(value: number) {
   return Math.max(0, Math.min(100, Math.round(value)));
 }
