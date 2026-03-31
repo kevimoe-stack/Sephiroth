@@ -26,6 +26,30 @@ function getParentStrategyId(strategy: { parameters?: Record<string, unknown> | 
   return typeof parentStrategyId === "string" && parentStrategyId.length > 0 ? parentStrategyId : null;
 }
 
+function getErrorMessage(error: unknown) {
+  if (error instanceof Error) {
+    const extra = JSON.stringify(error, Object.getOwnPropertyNames(error));
+    return [error.message, extra && extra !== "{}" ? extra : null].filter(Boolean).join(" | ");
+  }
+  if (typeof error === "object" && error !== null) {
+    const message = "message" in error && typeof error.message === "string" ? error.message : null;
+    const details = "details" in error && typeof error.details === "string" ? error.details : null;
+    const hint = "hint" in error && typeof error.hint === "string" ? error.hint : null;
+    const code = "code" in error && typeof error.code === "string" ? error.code : null;
+    const serialized = (() => {
+      try {
+        const value = JSON.stringify(error, Object.getOwnPropertyNames(error));
+        return value && value !== "{}" ? value : null;
+      } catch {
+        return String(error);
+      }
+    })();
+    return [message, details, hint, code ? `code:${code}` : null, serialized].filter(Boolean).join(" | ") || "unbekannter Fehler";
+  }
+  if (typeof error === "string" && error.trim().length > 0) return error;
+  return String(error || "unbekannter Fehler");
+}
+
 export default function StrategiesPage() {
   const { data: strategies = [] } = useStrategies();
   const { data: backtests = [] } = useBacktests();
@@ -153,20 +177,20 @@ export default function StrategiesPage() {
           timeframe: seed.timeframe ?? "1d",
           asset_class: seed.asset_class ?? "crypto",
           description: seed.description ?? null,
-          parameters: seed.parameters ?? null,
+          parameters: seed.parameters ? JSON.parse(JSON.stringify(seed.parameters)) : null,
           status: seed.status ?? "draft",
           is_champion: seed.is_champion ?? false,
-          tags: seed.tags ?? [],
+          tags: [...(seed.tags ?? [])],
         };
         try {
           await createStrategy.mutateAsync(payload);
         } catch (error) {
-          throw new Error(`Pilotstrategie "${payload.name}" konnte nicht angelegt werden: ${error instanceof Error ? error.message : "unbekannter Fehler"}`);
+          throw new Error(`Pilotstrategie "${payload.name}" konnte nicht angelegt werden: ${getErrorMessage(error)}`);
         }
       }
       toast.success(`${missingPilotSeeds.length} Pilotstrategie(n) angelegt.`);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Pilotstrategien konnten nicht angelegt werden.");
+      toast.error(getErrorMessage(error));
     }
   };
 
@@ -183,20 +207,20 @@ export default function StrategiesPage() {
           timeframe: seed.timeframe ?? "1d",
           asset_class: seed.asset_class ?? "crypto",
           description: seed.description ?? null,
-          parameters: seed.parameters ?? null,
+          parameters: seed.parameters ? JSON.parse(JSON.stringify(seed.parameters)) : null,
           status: seed.status ?? "draft",
           is_champion: seed.is_champion ?? false,
-          tags: seed.tags ?? [],
+          tags: [...(seed.tags ?? [])],
         };
         try {
           await createStrategy.mutateAsync(payload);
         } catch (error) {
-          throw new Error(`Report-Teststrategie "${payload.name}" konnte nicht angelegt werden: ${error instanceof Error ? error.message : "unbekannter Fehler"}`);
+          throw new Error(`Report-Teststrategie "${payload.name}" konnte nicht angelegt werden: ${getErrorMessage(error)}`);
         }
       }
       toast.success(`${missingReportSeeds.length} Report-Teststrategie(n) angelegt.`);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Report-Teststrategien konnten nicht angelegt werden.");
+      toast.error(getErrorMessage(error));
     }
   };
 
