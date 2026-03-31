@@ -147,7 +147,22 @@ export default function StrategiesPage() {
     }
     try {
       for (const seed of missingPilotSeeds) {
-        await createStrategy.mutateAsync(seed);
+        const payload = {
+          name: seed.name,
+          symbol: seed.symbol,
+          timeframe: seed.timeframe ?? "1d",
+          asset_class: seed.asset_class ?? "crypto",
+          description: seed.description ?? null,
+          parameters: seed.parameters ?? null,
+          status: seed.status ?? "draft",
+          is_champion: seed.is_champion ?? false,
+          tags: seed.tags ?? [],
+        };
+        try {
+          await createStrategy.mutateAsync(payload);
+        } catch (error) {
+          throw new Error(`Pilotstrategie "${payload.name}" konnte nicht angelegt werden: ${error instanceof Error ? error.message : "unbekannter Fehler"}`);
+        }
       }
       toast.success(`${missingPilotSeeds.length} Pilotstrategie(n) angelegt.`);
     } catch (error) {
@@ -162,7 +177,22 @@ export default function StrategiesPage() {
     }
     try {
       for (const seed of missingReportSeeds) {
-        await createStrategy.mutateAsync(seed);
+        const payload = {
+          name: seed.name,
+          symbol: seed.symbol,
+          timeframe: seed.timeframe ?? "1d",
+          asset_class: seed.asset_class ?? "crypto",
+          description: seed.description ?? null,
+          parameters: seed.parameters ?? null,
+          status: seed.status ?? "draft",
+          is_champion: seed.is_champion ?? false,
+          tags: seed.tags ?? [],
+        };
+        try {
+          await createStrategy.mutateAsync(payload);
+        } catch (error) {
+          throw new Error(`Report-Teststrategie "${payload.name}" konnte nicht angelegt werden: ${error instanceof Error ? error.message : "unbekannter Fehler"}`);
+        }
       }
       toast.success(`${missingReportSeeds.length} Report-Teststrategie(n) angelegt.`);
     } catch (error) {
