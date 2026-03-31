@@ -9,8 +9,15 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { useBacktests, useCreateStrategy, useStrategies, useWalkforwardResults } from "@/hooks/use-trading-data";
-import { computeStrategyPriority, getPilotComparison, getPilotRole, getResearchSnapshot } from "@/lib/analytics";
-import { buildPilotStrategySeeds } from "@/lib/strategy-presets";
+import {
+  computeStrategyPriority,
+  getPilotComparison,
+  getPilotRole,
+  getResearchSnapshot,
+  getValidationPipeline,
+  getValidationRecommendation,
+} from "@/lib/analytics";
+import { buildPilotStrategySeeds, buildReportStrategySeeds } from "@/lib/strategy-presets";
 import { formatDateTime, formatNumber, formatPercent } from "@/lib/utils";
 
 function getParentStrategyId(strategy: { parameters?: Record<string, unknown> | null; id: string }) {
@@ -31,6 +38,8 @@ export default function StrategiesPage() {
     strategies.filter((strategy) => (strategy.tags ?? []).includes("pilot")).map((strategy) => strategy.name),
   );
   const missingPilotSeeds = buildPilotStrategySeeds().filter((seed) => !pilotNames.has(String(seed.name ?? "")));
+  const existingStrategyNames = new Set(strategies.map((strategy) => strategy.name));
+  const missingReportSeeds = buildReportStrategySeeds().filter((seed) => !existingStrategyNames.has(String(seed.name ?? "")));
   const pilotComparison = useMemo(() => getPilotComparison(strategies, backtests, walkforward), [backtests, strategies, walkforward]);
   const comparisonStrategyIds = useMemo(
     () =>
@@ -146,6 +155,36 @@ export default function StrategiesPage() {
     }
   };
 
+  const handleCreateReportPack = async () => {
+    if (missingReportSeeds.length === 0) {
+      toast.message("Die Report-Teststrategien existieren bereits in der Liste.");
+      return;
+    }
+    try {
+      for (const seed of missingReportSeeds) {
+        await createStrategy.mutateAsync(seed);
+      }
+      toast.success(`${missingReportSeeds.length} Report-Teststrategie(n) angelegt.`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Report-Teststrategien konnten nicht angelegt werden.");
+    }
+  };
+
+  const getValidationSnapshot = (strategy: (typeof strategies)[number]) => {
+    const snapshot = getResearchSnapshot(backtests, walkforward, strategy.id);
+    const qualityGatePassed = ["candidate-ready", "execution-watchlist", "preferred-for-tournament"].some((tag) =>
+      (strategy.tags ?? []).includes(tag),
+    );
+    const pipeline = getValidationPipeline(strategy, snapshot.backtest, snapshot.walkforwardRun, qualityGatePassed);
+    const recommendation = getValidationRecommendation(
+      strategy,
+      snapshot.backtest,
+      snapshot.walkforwardRun,
+      qualityGatePassed,
+    );
+    return { snapshot, pipeline, recommendation };
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
@@ -162,6 +201,9 @@ export default function StrategiesPage() {
           </Button>
           <Button variant="secondary" onClick={() => void handleCreatePilot()} disabled={createStrategy.isPending || missingPilotSeeds.length === 0}>
             {createStrategy.isPending ? "Lege Pilot an..." : missingPilotSeeds.length === 0 ? "Pilot-Pack vorhanden" : `Pilot-Pack anlegen (${missingPilotSeeds.length})`}
+          </Button>
+          <Button variant="secondary" onClick={() => void handleCreateReportPack()} disabled={createStrategy.isPending || missingReportSeeds.length === 0}>
+            {createStrategy.isPending ? "Importiere Report..." : missingReportSeeds.length === 0 ? "Report-Pack vorhanden" : `Report-Strategien anlegen (${missingReportSeeds.length})`}
           </Button>
           <CreateStrategyDialog />
         </div>
@@ -316,7 +358,7 @@ export default function StrategiesPage() {
                   <CardContent className="space-y-4 text-sm text-slate-500">
                     <p>{strategy.description}</p>
                     {(() => {
-                      const snapshot = getResearchSnapshot(backtests, walkforward, strategy.id);
+                      const { snapshot } = getValidationSnapshot(strategy);
                       const { backtest, walkforwardRun, passRate } = snapshot;
 
                       if (!backtest && walkforwardRun.length === 0) return null;
@@ -342,6 +384,19 @@ export default function StrategiesPage() {
                               <p>Fee / Slip {backtest ? `${formatNumber(backtest.fee_rate, 4)} / ${formatNumber(backtest.slippage_rate, 4)}` : "-"}</p>
                             </div>
                           </div>
+                        </div>
+                      );
+                    })()}
+                    {(() => {
+                      const { pipeline, recommendation } = getValidationSnapshot(strategy);
+                      return (
+                        <div className="space-y-2 rounded-xl border border-success/20 bg-background/70 p-3">
+                          <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500">
+                            <span>Naechste Validierungsstufe</span>
+                            <span>{pipeline.doneCount}/{pipeline.totalCount} geschafft</span>
+                          </div>
+                          <p className="text-sm font-medium text-slate-900">{recommendation.title}</p>
+                          <p className="text-sm text-slate-600">{recommendation.detail}</p>
                         </div>
                       );
                     })()}
@@ -408,7 +463,7 @@ export default function StrategiesPage() {
               <CardContent className="space-y-4 text-sm text-slate-500">
                 <p>{strategy.description}</p>
                 {(() => {
-                  const snapshot = getResearchSnapshot(backtests, walkforward, strategy.id);
+                  const { snapshot } = getValidationSnapshot(strategy);
                   const { backtest, walkforwardRun, passRate } = snapshot;
 
                   if (!backtest && walkforwardRun.length === 0) return null;
@@ -434,6 +489,18 @@ export default function StrategiesPage() {
                           <p>Fee / Slip {backtest ? `${formatNumber(backtest.fee_rate, 4)} / ${formatNumber(backtest.slippage_rate, 4)}` : "-"}</p>
                         </div>
                       </div>
+                    </div>
+                  );
+                })()}
+                {(() => {
+                  const { pipeline, recommendation } = getValidationSnapshot(strategy);
+                  return (
+                    <div className="space-y-2 rounded-xl border border-border bg-background/60 p-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500">
+                        <span>Naechste Validierungsstufe</span>
+                        <span>{pipeline.doneCount}/{pipeline.totalCount} geschafft</span>
+                      </div>
+                      <p className="text-sm font-medium text-slate-900">{recommendation.title}</p>
                     </div>
                   );
                 })()}

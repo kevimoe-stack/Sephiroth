@@ -14,7 +14,7 @@ interface StrategyRow {
   symbol: string;
   timeframe: string;
   description: string | null;
-  parameters: Record<string, number> | null;
+  parameters: Record<string, unknown> | null;
 }
 
 interface BacktestConfig {
@@ -39,8 +39,18 @@ interface Trade {
 }
 
 function inferStrategyKind(strategy: StrategyRow) {
+  if (strategy.parameters?.entryModel === "ichimoku") return "ichimoku";
+  if (strategy.parameters?.entryModel === "atr-breakout") return "atr-breakout";
+  if (strategy.parameters?.entryModel === "mean-reversion-bb") return "mean-reversion-bb";
+  if (strategy.parameters?.entryModel === "stoch-rsi") return "stoch-rsi";
+  if (strategy.parameters?.entryModel === "cci-williams") return "cci-williams";
   if (strategy.parameters?.entryModel === "trend-pullback") return "trend-pullback";
   const source = `${strategy.name} ${strategy.description ?? ""}`.toLowerCase();
+  if (source.includes("ichimoku")) return "ichimoku";
+  if (source.includes("atr breakout")) return "atr-breakout";
+  if (source.includes("stoch")) return "stoch-rsi";
+  if (source.includes("cci") || source.includes("williams")) return "cci-williams";
+  if (source.includes("mean reversion bb")) return "mean-reversion-bb";
   if (source.includes("pullback")) return "trend-pullback";
   if (source.includes("rsi")) return "rsi";
   if (source.includes("boll")) return "bollinger";
@@ -191,12 +201,200 @@ function atr(candles: Candle[], period: number) {
   return result;
 }
 
+function rollingMidpoint(candles: Candle[], period: number) {
+  const result = Array.from({ length: candles.length }, () => Number.NaN);
+  for (let index = period - 1; index < candles.length; index += 1) {
+    const slice = candles.slice(index - period + 1, index + 1);
+    const highest = Math.max(...slice.map((candle) => candle.high));
+    const lowest = Math.min(...slice.map((candle) => candle.low));
+    result[index] = (highest + lowest) / 2;
+  }
+  return result;
+}
+
+function highestHigh(candles: Candle[], period: number, endIndexExclusive: number) {
+  const start = Math.max(0, endIndexExclusive - period);
+  const slice = candles.slice(start, endIndexExclusive);
+  if (slice.length === 0) return Number.NaN;
+  return Math.max(...slice.map((candle) => candle.high));
+}
+
+function lowestLow(candles: Candle[], period: number, endIndexExclusive: number) {
+  const start = Math.max(0, endIndexExclusive - period);
+  const slice = candles.slice(start, endIndexExclusive);
+  if (slice.length === 0) return Number.NaN;
+  return Math.min(...slice.map((candle) => candle.low));
+}
+
+function cci(candles: Candle[], period: number) {
+  const typicalPrices = candles.map((candle) => (candle.high + candle.low + candle.close) / 3);
+  const basis = sma(typicalPrices, period);
+  const result = Array.from({ length: candles.length }, () => Number.NaN);
+  for (let index = period - 1; index < candles.length; index += 1) {
+    const slice = typicalPrices.slice(index - period + 1, index + 1);
+    const mean = basis[index];
+    const meanDeviation = average(slice.map((value) => Math.abs(value - mean)));
+    if (meanDeviation === 0 || Number.isNaN(mean)) continue;
+    result[index] = (typicalPrices[index] - mean) / (0.015 * meanDeviation);
+  }
+  return result;
+}
+
+function williamsR(candles: Candle[], period: number) {
+  const result = Array.from({ length: candles.length }, () => Number.NaN);
+  for (let index = period - 1; index < candles.length; index += 1) {
+    const highest = highestHigh(candles, period, index + 1);
+    const lowest = lowestLow(candles, period, index + 1);
+    if (!Number.isFinite(highest) || !Number.isFinite(lowest) || highest === lowest) continue;
+    result[index] = ((highest - candles[index].close) / (highest - lowest)) * -100;
+  }
+  return result;
+}
+
+function stochasticRsi(
+  values: number[],
+  rsiPeriod: number,
+  stochPeriod: number,
+  smoothK: number,
+  smoothD: number,
+) {
+  const rsiValues = rsi(values, rsiPeriod);
+  const stochRaw = Array.from({ length: values.length }, () => Number.NaN);
+  for (let index = stochPeriod - 1; index < values.length; index += 1) {
+    const slice = rsiValues
+      .slice(index - stochPeriod + 1, index + 1)
+      .filter((value) => Number.isFinite(value));
+    if (slice.length !== stochPeriod) continue;
+    const lowest = Math.min(...slice);
+    const highest = Math.max(...slice);
+    if (highest === lowest) continue;
+    stochRaw[index] = ((rsiValues[index] - lowest) / (highest - lowest)) * 100;
+  }
+  const k = sma(stochRaw.map((value) => (Number.isNaN(value) ? 0 : value)), smoothK);
+  const d = sma(k.map((value) => (Number.isNaN(value) ? 0 : value)), smoothD);
+  return { k, d };
+}
+
 function createSignals(strategy: StrategyRow, candles: Candle[]) {
   const params = strategy.parameters ?? {};
   const closes = candles.map((candle) => candle.close);
   const signals = Array.from({ length: candles.length }, () => 0);
 
   switch (inferStrategyKind(strategy)) {
+    case "ichimoku": {
+      const tenkan = rollingMidpoint(candles, Number(params.tenkanPeriod ?? 9));
+      const kijun = rollingMidpoint(candles, Number(params.kijunPeriod ?? 26));
+      for (let index = 1; index < candles.length; index += 1) {
+        if (
+          Number.isFinite(tenkan[index - 1]) &&
+          Number.isFinite(kijun[index - 1]) &&
+          tenkan[index - 1] <= kijun[index - 1] &&
+          tenkan[index] > kijun[index]
+        ) {
+          signals[index] = 1;
+        }
+        if (
+          Number.isFinite(tenkan[index - 1]) &&
+          Number.isFinite(kijun[index - 1]) &&
+          tenkan[index - 1] >= kijun[index - 1] &&
+          tenkan[index] < kijun[index]
+        ) {
+          signals[index] = -1;
+        }
+      }
+      return signals;
+    }
+    case "atr-breakout": {
+      const atrPeriod = Number(params.atrPeriod ?? 14);
+      const breakoutLookback = Number(params.breakoutLookback ?? 20);
+      const breakoutAtrMultiple = Number(params.breakoutAtrMultiple ?? 0.25);
+      const exitEmaPeriod = Number(params.exitEma ?? 34);
+      const atrValues = atr(candles, atrPeriod);
+      const exitEma = ema(closes, exitEmaPeriod);
+      for (let index = 1; index < candles.length; index += 1) {
+        const breakoutLevel = highestHigh(candles, breakoutLookback, index) + ((atrValues[index] || 0) * breakoutAtrMultiple);
+        if (Number.isFinite(breakoutLevel) && closes[index] > breakoutLevel) {
+          signals[index] = 1;
+        }
+        if (Number.isFinite(exitEma[index]) && closes[index] < exitEma[index]) {
+          signals[index] = -1;
+        }
+      }
+      return signals;
+    }
+    case "mean-reversion-bb": {
+      const period = Number(params.period ?? 20);
+      const multiplier = Number(params.multiplier ?? 2);
+      const bands = bollinger(closes, period, multiplier);
+      for (let index = 1; index < candles.length; index += 1) {
+        if (Number.isFinite(bands.lower[index]) && closes[index - 1] >= bands.lower[index - 1] && closes[index] < bands.lower[index]) {
+          signals[index] = 1;
+        }
+        if (Number.isFinite(bands.middle[index]) && closes[index] >= bands.middle[index]) {
+          signals[index] = -1;
+        }
+      }
+      return signals;
+    }
+    case "stoch-rsi": {
+      const values = stochasticRsi(
+        closes,
+        Number(params.rsiPeriod ?? 14),
+        Number(params.stochPeriod ?? 14),
+        Number(params.smoothK ?? 3),
+        Number(params.smoothD ?? 3),
+      );
+      const oversold = Number(params.oversold ?? 20);
+      const overbought = Number(params.overbought ?? 80);
+      for (let index = 1; index < candles.length; index += 1) {
+        if (
+          Number.isFinite(values.k[index - 1]) &&
+          Number.isFinite(values.d[index - 1]) &&
+          values.k[index - 1] <= values.d[index - 1] &&
+          values.k[index] > values.d[index] &&
+          values.k[index] <= oversold
+        ) {
+          signals[index] = 1;
+        }
+        if (
+          Number.isFinite(values.k[index - 1]) &&
+          Number.isFinite(values.d[index - 1]) &&
+          values.k[index - 1] >= values.d[index - 1] &&
+          values.k[index] < values.d[index] &&
+          values.k[index] >= overbought
+        ) {
+          signals[index] = -1;
+        }
+      }
+      return signals;
+    }
+    case "cci-williams": {
+      const cciValues = cci(candles, Number(params.cciPeriod ?? 20));
+      const williamsValues = williamsR(candles, Number(params.williamsPeriod ?? 14));
+      const entryCci = Number(params.entryCci ?? -100);
+      const exitCci = Number(params.exitCci ?? 80);
+      const entryWilliams = Number(params.entryWilliams ?? -80);
+      const exitWilliams = Number(params.exitWilliams ?? -20);
+      for (let index = 1; index < candles.length; index += 1) {
+        if (
+          Number.isFinite(cciValues[index - 1]) &&
+          Number.isFinite(williamsValues[index - 1]) &&
+          cciValues[index - 1] <= entryCci &&
+          cciValues[index] > entryCci &&
+          williamsValues[index - 1] <= entryWilliams &&
+          williamsValues[index] > entryWilliams
+        ) {
+          signals[index] = 1;
+        }
+        if (
+          (Number.isFinite(cciValues[index]) && cciValues[index] >= exitCci) ||
+          (Number.isFinite(williamsValues[index]) && williamsValues[index] >= exitWilliams)
+        ) {
+          signals[index] = -1;
+        }
+      }
+      return signals;
+    }
     case "rsi": {
       const values = rsi(closes, Number(params.rsiPeriod ?? 14));
       const oversold = Number(params.oversold ?? 30);
@@ -592,6 +790,28 @@ export async function runWalkForwardEngine(
             { fastEma: 50, slowEma: 200, trendFilterEma: 200, rsiPeriod: 14, pullbackRsi: 44, recoveryRsi: 52, exitRsi: 68, confirmationBars: 2, maxPullbackPercent: 2.8, minHoldBars: 2 },
             { fastEma: 55, slowEma: 233, trendFilterEma: 233, rsiPeriod: 14, pullbackRsi: 42, recoveryRsi: 50, exitRsi: 64, confirmationBars: 3, maxPullbackPercent: 2.0, minHoldBars: 4 },
           ]
+        : inferStrategyKind(strategy) === "ichimoku"
+          ? [{ tenkanPeriod: 7, kijunPeriod: 22 }, { tenkanPeriod: 9, kijunPeriod: 26 }, { tenkanPeriod: 10, kijunPeriod: 30 }]
+        : inferStrategyKind(strategy) === "atr-breakout"
+          ? [
+              { atrPeriod: 14, breakoutLookback: 20, breakoutAtrMultiple: 0.25, exitEma: 34 },
+              { atrPeriod: 14, breakoutLookback: 30, breakoutAtrMultiple: 0.35, exitEma: 55 },
+              { atrPeriod: 21, breakoutLookback: 20, breakoutAtrMultiple: 0.45, exitEma: 34 },
+            ]
+        : inferStrategyKind(strategy) === "mean-reversion-bb"
+          ? [{ period: 20, multiplier: 2 }, { period: 18, multiplier: 2 }, { period: 20, multiplier: 2.5 }]
+        : inferStrategyKind(strategy) === "stoch-rsi"
+          ? [
+              { rsiPeriod: 14, stochPeriod: 14, smoothK: 3, smoothD: 3, oversold: 20, overbought: 80 },
+              { rsiPeriod: 10, stochPeriod: 14, smoothK: 3, smoothD: 3, oversold: 15, overbought: 85 },
+              { rsiPeriod: 14, stochPeriod: 21, smoothK: 3, smoothD: 5, oversold: 20, overbought: 80 },
+            ]
+        : inferStrategyKind(strategy) === "cci-williams"
+          ? [
+              { cciPeriod: 20, williamsPeriod: 14, entryCci: -100, exitCci: 80, entryWilliams: -80, exitWilliams: -20 },
+              { cciPeriod: 14, williamsPeriod: 14, entryCci: -120, exitCci: 100, entryWilliams: -85, exitWilliams: -15 },
+              { cciPeriod: 20, williamsPeriod: 20, entryCci: -90, exitCci: 70, entryWilliams: -80, exitWilliams: -25 },
+            ]
         : inferStrategyKind(strategy) === "ema"
         ? [{ fast: 8, slow: 21 }, { fast: 12, slow: 26 }, { fast: 21, slow: 55 }]
         : inferStrategyKind(strategy) === "rsi"

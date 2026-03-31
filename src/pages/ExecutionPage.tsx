@@ -23,7 +23,14 @@ import {
   useTournamentRuns,
   useWalkforwardResults,
 } from "@/hooks/use-trading-data";
-import { computeHealth, computeStrategyPriority, getPilotComparison, getPilotRole } from "@/lib/analytics";
+import {
+  computeHealth,
+  computeStrategyPriority,
+  getPilotComparison,
+  getPilotRole,
+  getValidationPipeline,
+  getValidationRecommendation,
+} from "@/lib/analytics";
 import { buildTestnetChecklist } from "@/lib/deployment";
 import { buildExecutionEligibility, buildReadinessReport } from "@/lib/readiness";
 import { formatNumber, formatPercent } from "@/lib/utils";
@@ -111,6 +118,27 @@ export default function ExecutionPage() {
   const selectedStrategyId = strategyId || preferredCandidate?.strategy.id || "";
   const selectedCandidate = executionCandidates.find((row) => row.strategy.id === selectedStrategyId) ?? null;
   const selectedReadiness = selectedCandidate ?? null;
+  const selectedQualityGatePassed = selectedCandidate
+    ? ["candidate-ready", "execution-watchlist", "preferred-for-tournament"].some((tag) =>
+        (selectedCandidate.strategy.tags ?? []).includes(tag),
+      )
+    : false;
+  const selectedValidationPipeline = selectedCandidate
+    ? getValidationPipeline(
+        selectedCandidate.strategy,
+        selectedCandidate.backtest,
+        selectedCandidate.wfRows,
+        selectedQualityGatePassed,
+      )
+    : null;
+  const selectedValidationRecommendation = selectedCandidate
+    ? getValidationRecommendation(
+        selectedCandidate.strategy,
+        selectedCandidate.backtest,
+        selectedCandidate.wfRows,
+        selectedQualityGatePassed,
+      )
+    : null;
   const suggestedEligibleCandidate = selectedCandidate?.eligibility.eligible
     ? selectedCandidate
     : eligibleCandidates.find((row) => getPilotRole(row.strategy.id, pilotComparison) !== "comparison")
@@ -210,6 +238,22 @@ export default function ExecutionPage() {
                   <p className="mt-1">
                     Eligibility {selectedCandidate.eligibility.eligible ? "testnet-ready" : "blocked"}
                   </p>
+                )}
+                {selectedValidationPipeline && selectedValidationRecommendation && (
+                  <div className="mt-3 rounded-xl border border-border bg-background/70 p-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <p className="font-medium text-foreground">Naechste Validierungsstufe</p>
+                      <span className="text-xs text-slate-500">
+                        {selectedValidationPipeline.doneCount}/{selectedValidationPipeline.totalCount} Stufen geschafft
+                      </span>
+                    </div>
+                    <p className="mt-2 text-sm font-medium text-foreground">
+                      {selectedValidationRecommendation.title}
+                    </p>
+                    <p className="mt-1 text-sm text-slate-600">
+                      {selectedValidationRecommendation.detail}
+                    </p>
+                  </div>
                 )}
                 {liveExecutionBlocked ? (
                   <div className="mt-3 space-y-2 text-rose-600">
